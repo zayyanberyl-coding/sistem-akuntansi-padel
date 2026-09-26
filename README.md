@@ -2,6 +2,8 @@
 
 Tugas UTS mata kuliah **Pengkodean dan Pemrograman** – S1 Akuntansi.
 
+🌐 **Demo website:** https://zayyanberyl-coding.github.io/sistem-akuntansi-padel/
+
 Web app satu halaman (single-page) untuk mencatat booking lapangan padel, pembayaran,
 sewa peralatan, dan penjualan paket member. Setiap transaksi **otomatis dijurnal**
 oleh trigger database, lalu diringkas menjadi Jurnal Umum, Buku Besar, dan Laporan Pendapatan.
@@ -209,6 +211,7 @@ sistem-akuntansi-padel/
 │       ├── jurnal.js
 │       ├── bukubesar.js
 │       └── laporan.js
+├── index.html          # pengalih ke frontend/ (untuk GitHub Pages)
 ├── .gitignore
 └── README.md
 ```
