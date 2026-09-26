@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smash Padel Club - Sistem Akuntansi Pendapatan</title>
+  <!-- Ikon di tab browser (favicon) = logo Smash Padel Club -->
+  <link rel="icon" type="image/svg+xml" href="img/logo.svg">
+  <!-- Font Inter (Google Fonts) & ikon Tabler (CDN) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3/dist/tabler-icons.min.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- =============================================================
+       SIDEBAR MENU
+       Setiap link punya atribut data-page = nama halaman.
+       app.js membaca atribut ini untuk menampilkan halaman yang sesuai.
+       ============================================================= -->
+  <aside class="sidebar" id="sidebar">
+    <!-- Logo: ikon (img/logo.svg) + tulisan SMASH / PADEL CLUB -->
+    <a class="brand" href="#dashboard" aria-label="Smash Padel Club - ke Dashboard">
+      <img class="brand-ikon" src="img/logo.svg" alt="">
+      <span class="brand-teks">
+        <strong>SMASH</strong>
+        <span>PADEL CLUB</span>
+      </span>
+    </a>
+
+    <!-- Ikon memakai Tabler Icons: <i class="ti ti-nama-ikon"></i> -->
+    <nav class="menu">
+      <!-- Pil hijau yang meluncur ke menu aktif (digerakkan animasi.js) -->
+      <span class="menu-indikator" id="menu-indikator"></span>
+      <p class="menu-label">Utama</p>
+      <a href="#dashboard"  data-page="dashboard"><i class="ti ti-layout-dashboard"></i> Dashboard</a>
+      <p class="menu-label">Operasional</p>
+      <a href="#booking"    data-page="booking"><i class="ti ti-calendar-event"></i> Booking</a>
+      <a href="#pembayaran" data-page="pembayaran"><i class="ti ti-cash"></i> Pembayaran</a>
+      <a href="#peralatan"  data-page="peralatan"><i class="ti ti-ball-tennis"></i> Peralatan</a>
+      <a href="#member"     data-page="member"><i class="ti ti-users"></i> Member</a>
+      <p class="menu-label">Akuntansi</p>
+      <a href="#jurnal"     data-page="jurnal"><i class="ti ti-notebook"></i> Jurnal Umum</a>
+      <a href="#bukubesar"  data-page="bukubesar"><i class="ti ti-books"></i> Buku Besar</a>
+      <a href="#laporan"    data-page="laporan"><i class="ti ti-report-money"></i> Laporan Pendapatan</a>
+    </nav>
+  </aside>
+
+  <!-- =============================================================
+       AREA KONTEN
+       ============================================================= -->
+  <main class="konten">
+    <header class="topbar">
+      <button class="tombol-menu" id="tombol-menu" aria-label="Buka menu"><i class="ti ti-menu-2"></i></button>
+      <div>
+        <div class="breadcrumb">
+          <i class="ti ti-folder"></i> Beranda <i class="ti ti-chevron-right"></i>
+          <i class="ti ti-folder"></i> <span id="breadcrumb-halaman">Dashboard</span>
+        </div>
+        <h1 id="judul-halaman">Dashboard</h1>
+      </div>
+      <span class="tanggal-hari-ini"><i class="ti ti-calendar"></i> <span id="tanggal-hari-ini"></span></span>
+    </header>
+
+    <!-- Pesan kalau Supabase belum dikonfigurasi -->
+    <div class="alert alert-peringatan" id="alert-konfigurasi" hidden>
+      <strong>Supabase belum terhubung.</strong>
+      Isi <code>SUPABASE_URL</code> dan <code>SUPABASE_ANON_KEY</code> di file <code>js/supabase.js</code>.
+    </div>
+
+    <!-- ===================== 1. DASHBOARD ===================== -->
+    <section class="page" id="page-dashboard">
+      <!-- Grid 12 kolom; posisi kartu diatur class d-... di style.css -->
+      <div class="dash-grid">
+
+        <!-- 1. Kartu hero: foto lapangan + peralatan sewa -->
+        <div class="d-hero">
+          <!-- Foto: Unsplash (lisensi gratis) -->
+          <div class="hero-foto">
+            <!-- lapisan foto terpisah supaya bisa di-zoom pelan saat disorot -->
+            <div class="hero-gambar" style="background-image: url('https://images.unsplash.com/photo-1709587825415-814c2d7cfce7?w=700&q=70&auto=format')"></div>
+            <span class="hero-chip"><i class="ti ti-map-pin"></i> Smash Padel Club</span>
+            <div class="hero-teks">
+              <strong id="dash-info-lapangan">-</strong>
+              Buka setiap hari 07.00–23.00
+            </div>
+          </div>
+          <div class="hero-alat" id="dash-alat">
+            <span class="skeleton skeleton-blok" style="height:90px"></span>
+            <span class="skeleton skeleton-blok" style="height:90px"></span>
+            <span class="skeleton skeleton-blok" style="height:90px"></span>
+          </div>
+        </div>
+
+        <!-- 2. Pendapatan (kartu hijau) + kas & diterima di muka -->
+        <div class="d-uang">
+          <div class="kartu kartu-hijau">
+            <div class="kartu-judul">
+              <h2>Pendapatan bulan ini</h2>
+              <a class="ikon-bulat" href="#laporan" title="Buka laporan"><i class="ti ti-arrow-up-right"></i></a>
+            </div>
+            <!-- class "skeleton" = kotak berkilau selama data dimuat, dihapus dashboard.js -->
+            <div class="angka-besar skeleton" id="dash-pendapatan-bulan">-</div>
+            <div class="tren" id="dash-tren-pendapatan"></div>
+          </div>
+          <div class="kartu">
+            <div class="dua-angka">
+              <div>
+                <small><i class="ti ti-wallet"></i> Saldo kas</small>
+                <div class="angka-sedang skeleton" id="dash-kas">-</div>
+              </div>
+              <div>
+                <small><i class="ti ti-clock-dollar"></i> Diterima di muka</small>
+                <div class="angka-sedang skeleton" id="dash-pddm">-</div>
+              </div>
+            </div>
+          </div>
+          <!-- Tren pendapatan harian (grafik garis, digambar di dashboard.js) -->
+          <div class="kartu kartu-tren">
+            <div class="kartu-judul">
+              <h2>Tren pendapatan harian</h2>
+              <span class="okupansi">30 hari</span>
+            </div>
+            <div class="tren-ringkas">
+              <div><small>Rata-rata / hari</small><b class="skeleton" id="dash-rata-harian">-</b></div>
+              <div><small>Hari terbaik</small><b class="skeleton" id="dash-hari-terbaik">-</b></div>
+            </div>
+            <div class="sparkline" id="dash-sparkline"></div>
+          </div>
+        </div>
+
+        <!-- 3. Rincian pendapatan per akun -->
+        <div class="kartu d-rincian">
+          <div class="kartu-judul">
+            <div>
+              <h2>Rincian pendapatan bulanan</h2>
+              <small class="subjudul" id="dash-bulan-label"></small>
+            </div>
+            <a class="ikon-bulat" href="#jurnal" title="Buka jurnal"><i class="ti ti-dots"></i></a>
+          </div>
+          <div id="dash-grafik"><span class="skeleton skeleton-blok" style="height:150px"></span></div>
+          <!-- Diagram donut sumber pendapatan (digambar dengan SVG di dashboard.js) -->
+          <div class="donut-wrap" id="dash-donut"></div>
+          <div class="catatan-kecil">Diterima di muka belum dihitung sebagai pendapatan sampai lapangan dipakai.</div>
+        </div>
+
+        <!-- 4. Jadwal berikutnya -->
+        <div class="kartu d-jadwal">
+          <div class="kartu-judul">
+            <h2>Jadwal berikutnya</h2>
+            <a class="ikon-bulat" href="#booking" title="Buka booking"><i class="ti ti-arrow-up-right"></i></a>
+          </div>
+          <div class="tren" style="margin: -8px 0 12px"><b id="dash-booking-hari-ini">-</b> booking hari ini</div>
+          <div id="dash-jadwal"><span class="skeleton skeleton-blok" style="height:220px"></span></div>
+        </div>
+
+        <!-- 5. Heatmap jam sibuk (30 hari terakhir) -->
+        <div class="kartu d-heatmap">
+          <div class="kartu-judul">
+            <h2>Jam sibuk</h2>
+            <span class="okupansi">30 hari terakhir</span>
+          </div>
+          <div class="angka-sedang"><span id="dash-total-jam">-</span> jam dimainkan</div>
+          <div class="tren" id="dash-jam-puncak" style="margin-bottom: 14px"></div>
+          <div class="heatmap" id="dash-heatmap"><span class="skeleton skeleton-blok" style="height:150px; grid-column: 1 / -1"></span></div>
+        </div>
+
+        <!-- 6. Pemakaian lapangan 7 hari terakhir -->
+        <div class="kartu d-grafik">
+          <div class="kartu-judul">
+            <h2>Pemakaian lapangan</h2>
+            <span class="okupansi">7 hari</span>
+          </div>
+          <div class="angka-sedang"><span id="dash-jam-minggu">-</span> jam</div>
+          <div class="tren" id="dash-tren-minggu"></div>
+          <div class="grafik-batang" id="dash-batang"><span class="skeleton skeleton-blok" style="height:100%"></span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 2. BOOKING ===================== -->
+    <section class="page" id="page-booking" hidden>
+      <!-- Jadwal dibuat lebih lebar dari form (lihat .kolom-booking di CSS) -->
+      <div class="kolom-booking">
+        <form class="panel" id="form-booking">
+          <div class="panel-header">
+            <h2>Booking Baru</h2>
+            <!-- Ke menu Member untuk mendaftarkan pelanggan yang belum ada di daftar -->
+            <button type="button" class="tombol tombol-kecil" id="bk-member-baru">
+              <i class="ti ti-user-plus"></i> Member baru
+            </button>
+          </div>
+          <label>Pelanggan
+            <select id="bk-pelanggan" required></select>
+          </label>
+          <label>Lapangan
+            <select id="bk-lapangan" required></select>
+          </label>
+          <label>Tanggal
+            <input type="date" id="bk-tanggal" required>
+          </label>
+          <div class="baris">
+            <label>Jam Mulai
+              <select id="bk-jam-mulai" required></select>
+            </label>
+            <label>Jam Selesai
+              <select id="bk-jam-selesai" required></select>
+            </label>
+          </div>
+          <label>Cara Bayar
+            <select id="bk-metode">
+              <option value="reguler">Reguler (DP / lunas)</option>
+              <option value="member">Pakai Paket Member</option>
+            </select>
+          </label>
+          <label id="bk-wrap-paket" hidden>Paket Member Pelanggan
+            <select id="bk-paket"></select>
+          </label>
+          <label>Catatan (opsional)
+            <input type="text" id="bk-catatan" maxlength="200">
+          </label>
+
+          <!-- Pratinjau tarif & hasil cek bentrok -->
+          <div class="pratinjau" id="bk-pratinjau">Pilih lapangan, tanggal &amp; jam untuk melihat tarif.</div>
+
+          <button type="submit" class="tombol tombol-utama" id="bk-simpan">Simpan Booking</button>
+          <p class="bantuan">Prime time: Senin–Jumat 17.00–23.00, serta Sabtu–Minggu seharian.</p>
+        </form>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Jadwal Lapangan <span id="bk-label-jadwal" class="abu"></span></h2>
+            <span class="okupansi" id="bk-okupansi"></span>
+          </div>
+          <!-- Keterangan warna blok jadwal -->
+          <div class="legenda">
+            <span><i class="slot-menunggu"></i> Menunggu / DP</span>
+            <span><i class="slot-lunas"></i> Lunas</span>
+            <span><i class="slot-member"></i> Paket member</span>
+            <span><i class="slot-selesai"></i> Selesai</span>
+            <span>Klik slot kosong untuk booking</span>
+          </div>
+          <div class="tabel-wrap">
+            <table class="jadwal" id="bk-jadwal"></table>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Daftar Booking</h2>
+          <div class="filter">
+            <input type="date" id="bk-filter-tanggal" title="Filter tanggal">
+            <select id="bk-filter-status">
+              <option value="">Semua status</option>
+              <option value="menunggu">Menunggu</option>
+              <option value="dp">DP</option>
+              <option value="lunas">Lunas</option>
+              <option value="selesai">Selesai</option>
+              <option value="batal">Batal</option>
+            </select>
+            <button class="tombol" id="bk-filter-reset" type="button">Reset</button>
+          </div>
+        </div>
+        <div class="tabel-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Kode</th><th>Tanggal</th><th>Jam</th><th>Lapangan</th><th>Pelanggan</th>
+                <th>Tarif</th><th class="angka">Total</th><th class="angka">Sisa</th><th>Status</th><th>Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="bk-daftar"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 3. PEMBAYARAN ===================== -->
+    <section class="page" id="page-pembayaran" hidden>
+      <div class="dua-kolom">
+        <form class="panel" id="form-pembayaran">
+          <h2>Terima Pembayaran</h2>
+          <label>Booking (belum lunas)
+            <select id="by-booking" required></select>
+          </label>
+          <div class="pratinjau" id="by-info">Pilih booking terlebih dahulu.</div>
+          <label>Jumlah (Rp)
+            <input type="number" id="by-jumlah" min="1" step="1" required>
+          </label>
+          <div class="baris-tombol">
+            <button type="button" class="tombol" id="by-isi-dp">Isi DP 50%</button>
+            <button type="button" class="tombol" id="by-isi-lunas">Isi Pelunasan</button>
+          </div>
+          <div class="baris">
+            <label>Tanggal
+              <input type="date" id="by-tanggal" required>
+            </label>
+            <label>Metode
+              <select id="by-metode">
+                <option value="tunai">Tunai</option>
+                <option value="transfer">Transfer</option>
+                <option value="qris">QRIS</option>
+              </select>
+            </label>
+          </div>
+          <button type="submit" class="tombol tombol-utama">Simpan Pembayaran</button>
+          <p class="bantuan">Jurnal otomatis: <b>Kas (D)</b> / <b>Pendapatan Diterima di Muka (K)</b>.
+            Pendapatan baru diakui saat booking ditandai selesai.</p>
+        </form>
+
+        <div class="panel">
+          <h2>Riwayat Pembayaran</h2>
+          <div class="tabel-wrap">
+            <table>
+              <thead>
+                <tr><th>Tanggal</th><th>Booking</th><th>Pelanggan</th><th>Jenis</th><th>Metode</th><th class="angka">Jumlah</th></tr>
+              </thead>
+              <tbody id="by-daftar"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 4. PERALATAN ===================== -->
+    <section class="page" id="page-peralatan" hidden>
+      <div class="dua-kolom">
+        <form class="panel" id="form-sewa">
+          <h2>Sewa Peralatan</h2>
+          <label>Booking
+            <select id="sw-booking" required></select>
+          </label>
+          <label>Peralatan
+            <select id="sw-peralatan" required></select>
+          </label>
+          <label>Jumlah
+            <input type="number" id="sw-jumlah" min="1" step="1" value="1" required>
+          </label>
+          <div class="pratinjau" id="sw-info">-</div>
+          <button type="submit" class="tombol tombol-utama">Simpan Sewa</button>
+          <p class="bantuan">Jurnal otomatis: <b>Kas (D)</b> / <b>Pendapatan Sewa Peralatan (K)</b>. Stok berkurang otomatis.</p>
+        </form>
+
+        <form class="panel" id="form-peralatan">
+          <h2 id="pr-judul-form">Tambah Peralatan</h2>
+          <input type="hidden" id="pr-id">
+          <label>Nama
+            <input type="text" id="pr-nama" required>
+          </label>
+          <div class="baris">
+            <label>Jenis
+              <select id="pr-jenis">
+                <option value="raket">Raket</option>
+                <option value="bola">Bola</option>
+              </select>
+            </label>
+            <label>Stok
+              <input type="number" id="pr-stok" min="0" step="1" value="0" required>
+            </label>
+          </div>
+          <div class="baris">
+            <label>Tarif Sewa (Rp)
+              <input type="number" id="pr-tarif" min="0" step="1" required>
+            </label>
+            <label>Denda Rusak / unit (Rp)
+              <input type="number" id="pr-denda" min="0" step="1" value="0" required>
+            </label>
+          </div>
+          <div class="baris-tombol">
+            <button type="submit" class="tombol tombol-utama">Simpan</button>
+            <button type="button" class="tombol" id="pr-batal-edit" hidden>Batal Edit</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h2>Stok Peralatan</h2>
+        <div class="tabel-wrap">
+          <table>
+            <thead>
+              <tr><th>Nama</th><th>Jenis</th><th class="angka">Tarif Sewa</th><th class="angka">Denda Rusak</th><th class="angka">Stok</th><th>Aksi</th></tr>
+            </thead>
+            <tbody id="pr-daftar"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Riwayat Sewa Peralatan</h2>
+        <div class="tabel-wrap">
+          <table>
+            <thead>
+              <tr><th>Tgl Sewa</th><th>Booking</th><th>Pelanggan</th><th>Peralatan</th><th class="angka">Jml</th>
+                  <th class="angka">Subtotal</th><th>Status</th><th class="angka">Denda</th><th>Aksi</th></tr>
+            </thead>
+            <tbody id="sw-daftar"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Dialog pengembalian peralatan -->
+      <dialog id="dialog-kembali">
+        <form id="form-kembali" method="dialog">
+          <h2>Pengembalian Peralatan</h2>
+          <p id="kb-info"></p>
+          <label>Jumlah unit rusak
+            <input type="number" id="kb-rusak" min="0" step="1" value="0">
+          </label>
+          <label>Denda (Rp) — kosongkan/0 untuk hitung otomatis
+            <input type="number" id="kb-denda" min="0" step="1" value="0">
+          </label>
+          <p class="bantuan">Jika ada denda, jurnal otomatis: <b>Kas (D)</b> / <b>Pendapatan Denda (K)</b>.
+            Unit rusak tidak kembali ke stok.</p>
+          <div class="baris-tombol">
+            <button type="submit" class="tombol tombol-utama" value="simpan">Proses</button>
+            <button type="submit" class="tombol" value="batal" formnovalidate>Batal</button>
+          </div>
+        </form>
+      </dialog>
+    </section>
+
+    <!-- ===================== 5. MEMBER ===================== -->
+    <section class="page" id="page-member" hidden>
+      <div class="dua-kolom">
+        <form class="panel" id="form-pelanggan">
+          <h2>Tambah Pelanggan</h2>
+          <label>Nama
+            <input type="text" id="pl-nama" required>
+          </label>
+          <label>No. HP
+            <input type="tel" id="pl-hp">
+          </label>
+          <label>Email
+            <input type="email" id="pl-email">
+          </label>
+          <button type="submit" class="tombol tombol-utama">Simpan Pelanggan</button>
+        </form>
+
+        <form class="panel" id="form-beli-paket">
+          <div class="panel-header">
+            <h2>Paket Membership</h2>
+            <!-- Membuka modal (jendela melayang) untuk menambah jenis paket -->
+            <button type="button" class="tombol tombol-kecil" id="pk-buka-modal">
+              <i class="ti ti-plus"></i> Paket baru
+            </button>
+          </div>
+          <label>Pelanggan
+            <select id="bp-pelanggan" required></select>
+          </label>
+          <label>Paket
+            <select id="bp-paket" required></select>
+          </label>
+          <div class="baris">
+            <label>Tanggal
+              <input type="date" id="bp-tanggal" required>
+            </label>
+            <label>Metode
+              <select id="bp-metode">
+                <option value="tunai">Tunai</option>
+                <option value="transfer">Transfer</option>
+                <option value="qris">QRIS</option>
+              </select>
+            </label>
+          </div>
+          <button type="submit" class="tombol tombol-utama">Simpan Penjualan</button>
+          <p class="bantuan">Jurnal otomatis: <b>Kas (D)</b> / <b>Pendapatan Diterima di Muka (K)</b>.
+            Diakui jadi pendapatan per jam dipakai.</p>
+        </form>
+      </div>
+
+      <!-- MODAL: tambah jenis paket baru.
+           <dialog> adalah elemen HTML bawaan untuk jendela melayang.
+           Dibuka dengan dialog.showModal(), ditutup dengan dialog.close()
+           atau tombol Esc. -->
+      <dialog id="dialog-paket">
+        <form id="form-paket">
+          <div class="panel-header">
+            <h2>Tambah Paket Baru</h2>
+            <button type="button" class="tombol tombol-kecil" id="pk-tutup-modal" aria-label="Tutup">
+              <i class="ti ti-x"></i>
+            </button>
+          </div>
+          <label>Nama Paket
+            <input type="text" id="pk-nama" placeholder="Paket Platinum 20 Jam" required>
+          </label>
+          <div class="baris">
+            <label>Jumlah Jam
+              <input type="number" id="pk-jam" min="1" step="1" required>
+            </label>
+            <label>Berlaku (hari)
+              <input type="number" id="pk-hari" min="1" step="1" value="30" required>
+            </label>
+          </div>
+          <label>Harga (Rp)
+            <input type="number" id="pk-harga" min="0" step="1" required>
+          </label>
+          <div class="pratinjau" id="pk-info">Isi jumlah jam dan harga untuk melihat harga per jam.</div>
+          <div class="baris">
+            <button type="button" class="tombol" id="pk-batal">Batal</button>
+            <button type="submit" class="tombol tombol-utama">Simpan Paket</button>
+          </div>
+        </form>
+      </dialog>
+
+      <div class="panel">
+        <h2>Paket Member Terjual</h2>
+        <div class="tabel-wrap">
+          <table>
+            <thead>
+              <tr><th>Tgl Beli</th><th>Pelanggan</th><th>Paket</th><th class="angka">Harga</th>
+                  <th class="angka">Jam Terpakai</th><th class="angka">Sisa Jam</th><th>Berlaku s.d.</th><th>Status</th></tr>
+            </thead>
+            <tbody id="bp-daftar"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="dua-kolom">
+        <div class="panel">
+          <h2>Daftar Pelanggan</h2>
+          <div class="tabel-wrap">
+            <table>
+              <thead><tr><th>Nama</th><th>No. HP</th><th>Email</th><th>Terdaftar</th></tr></thead>
+              <tbody id="pl-daftar"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Jenis Paket</h2>
+          <div class="tabel-wrap">
+            <table>
+              <thead><tr><th>Paket</th><th class="angka">Jam</th><th class="angka">Harga</th><th class="angka">Per Jam</th><th>Berlaku</th><th>Aksi</th></tr></thead>
+              <tbody id="pk-daftar"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 6. JURNAL UMUM ===================== -->
+    <section class="page" id="page-jurnal" hidden>
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Jurnal Umum</h2>
+          <div class="filter">
+            <label class="inline">Dari <input type="date" id="ju-dari"></label>
+            <label class="inline">Sampai <input type="date" id="ju-sampai"></label>
+            <button class="tombol tombol-utama" id="ju-tampil" type="button">Tampilkan</button>
+          </div>
+        </div>
+        <p class="bantuan">Jurnal dibuat otomatis oleh trigger database, tidak bisa diketik manual.</p>
+        <div class="tabel-wrap">
+          <table class="tabel-akuntansi">
+            <thead>
+              <tr><th>Tanggal</th><th>No. Bukti</th><th>Keterangan / Akun</th><th>Kode</th><th class="angka">Debit</th><th class="angka">Kredit</th></tr>
+            </thead>
+            <tbody id="ju-isi"></tbody>
+            <tfoot id="ju-total"></tfoot>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 7. BUKU BESAR ===================== -->
+    <section class="page" id="page-bukubesar" hidden>
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Buku Besar</h2>
+          <div class="filter">
+            <select id="bb-akun"></select>
+            <label class="inline">Dari <input type="date" id="bb-dari"></label>
+            <label class="inline">Sampai <input type="date" id="bb-sampai"></label>
+            <button class="tombol tombol-utama" id="bb-tampil" type="button">Tampilkan</button>
+          </div>
+        </div>
+        <div id="bb-isi"></div>
+      </div>
+    </section>
+
+    <!-- ===================== 8. LAPORAN PENDAPATAN ===================== -->
+    <section class="page" id="page-laporan" hidden>
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Laporan Pendapatan</h2>
+          <div class="filter">
+            <label class="inline">Dari <input type="date" id="lp-dari"></label>
+            <label class="inline">Sampai <input type="date" id="lp-sampai"></label>
+            <button class="tombol tombol-utama" id="lp-tampil" type="button">Tampilkan</button>
+            <button class="tombol" id="lp-cetak" type="button"><i class="ti ti-printer"></i> Cetak</button>
+          </div>
+        </div>
+        <div id="lp-isi" class="laporan"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Notifikasi kecil (toast) -->
+  <div class="toast" id="toast"></div>
+
+  <!-- =============================================================
+       SCRIPT
+       1. Library supabase-js dari CDN
+       2. supabase.js  -> membuat koneksi (client)
+       3. app.js       -> fungsi bantu + perpindahan menu
+       4. file per fitur
+       ============================================================= -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/animasi.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/booking.js"></script>
+  <script src="js/pembayaran.js"></script>
+  <script src="js/peralatan.js"></script>
+  <script src="js/member.js"></script>
+  <script src="js/jurnal.js"></script>
+  <script src="js/bukubesar.js"></script>
+  <script src="js/laporan.js"></script>
+</body>
+</html>

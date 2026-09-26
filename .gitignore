@@ -1,0 +1,19 @@
+# File sistem operasi
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Pengaturan editor
+.vscode/
+.idea/
+
+# File rahasia / environment (JANGAN di-upload)
+.env
+.env.*
+*.local
+
+# Node (jika nanti memakai npm)
+node_modules/
+
+# Log
+*.log

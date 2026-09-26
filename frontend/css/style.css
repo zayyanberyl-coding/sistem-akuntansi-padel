@@ -1,0 +1,533 @@
+/* ==================================================================
+   STYLE - Smash Padel Club
+   Gaya: dashboard olahraga modern - latar hijau mint, kartu putih
+   membulat, aksen hijau tua, foto lapangan & peralatan.
+   Semua warna disimpan di variabel (--nama) supaya mudah diganti.
+   ================================================================== */
+:root {
+  /* Warna dasar */
+  --latar: #e9f0ed;         /* latar halaman (hijau mint pucat) */
+  --putih: #ffffff;         /* kartu & panel */
+  --teks: #18261f;          /* teks utama */
+  --abu: #5f6b65;           /* teks pendukung */
+  --abu-muda: #93a09a;      /* teks keterangan kecil */
+  --garis: #e3ebe7;         /* garis tipis */
+  --garis-tebal: #cbd8d2;
+  --hover: #f1f6f3;
+
+  /* Warna aksen (hijau tua) */
+  --aksen: #14614f;
+  --aksen-tua: #0b3f33;
+  --aksen-muda: #e0efe9;
+  --aksen-sedang: #8fc2b0;
+
+  /* Warna kedua (emas) untuk sorotan kecil */
+  --emas: #d49a3a;
+  --emas-muda: #f6e7cb;
+
+  /* Warna merek (bola padel) - dipakai sedikit saja */
+  --lime: #c6f432;
+  --lime-tua: #27500a;
+
+  /* Warna status */
+  --kuning-bg: #faeeda;  --kuning: #854f0b;
+  --biru-bg: #e6f1fb;    --biru: #0c447c;
+  --hijau-bg: #e1f5ee;   --hijau: #085041;
+  --merah-bg: #fcebeb;   --merah: #a32d2d;
+  --ungu-bg: #eeedfe;    --ungu: #3c3489;
+
+  --radius: 18px;
+  --radius-kecil: 8px;
+}
+
+* { box-sizing: border-box; }
+
+/* Elemen dengan atribut hidden harus benar-benar tersembunyi */
+[hidden] { display: none !important; }
+
+body {
+  margin: 0;
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--teks);
+  background: var(--latar);
+  display: flex;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+.ti { font-size: 18px; vertical-align: -3px; }
+
+/* ------------------------- SIDEBAR ------------------------- */
+/* Sidebar berupa kartu putih yang "melayang" di kiri */
+.sidebar {
+  width: 236px;
+  flex-shrink: 0;
+  background: var(--putih);
+  border-radius: 22px;
+  margin: 14px 0 14px 14px;
+  padding: 20px 12px;
+  position: sticky;
+  top: 14px;
+  height: calc(100vh - 28px);
+  overflow-y: auto;
+}
+/* Logo: ikon + tulisan "SMASH" tebal dan "PADEL CLUB" berjarak lebar */
+.brand {
+  display: flex; gap: 11px; align-items: center; padding: 0 8px; margin-bottom: 26px;
+  text-decoration: none;
+}
+.brand-ikon { width: 42px; height: 42px; flex-shrink: 0; transition: transform .3s var(--halus, ease); }
+.brand:hover .brand-ikon { transform: rotate(-8deg) scale(1.05); }
+.brand-teks { display: flex; flex-direction: column; line-height: 1; }
+.brand-teks strong { font-size: 20px; font-weight: 800; letter-spacing: .02em; color: var(--aksen); }
+.brand-teks span { font-size: 10px; font-weight: 600; letter-spacing: .3em; color: var(--abu); margin-top: 5px; }
+
+.menu-label {
+  margin: 18px 10px 6px; font-size: 11.5px; font-weight: 500; color: var(--abu-muda);
+}
+.menu a {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; margin-bottom: 3px; border-radius: 99px;
+  color: var(--abu); text-decoration: none; font-weight: 500;
+}
+.menu a:hover { background: var(--hover); color: var(--teks); }
+/* Menu aktif: pil hijau tua, seperti tombol "Dashboard" di referensi */
+.menu a.aktif { background: var(--aksen); color: #fff; }
+
+/* ------------------------- KONTEN ------------------------- */
+.konten { flex: 1; min-width: 0; padding: 22px 28px 48px; max-width: 1500px; }
+
+.topbar { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 22px; }
+.topbar > div { flex: 1; }
+.breadcrumb { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--abu); margin-bottom: 4px; }
+.breadcrumb .ti { font-size: 14px; }
+.topbar h1 { margin: 0; font-size: 28px; font-weight: 500; letter-spacing: -0.02em; }
+.tanggal-hari-ini {
+  display: inline-flex; align-items: center; gap: 8px;
+  color: var(--teks); font-size: 13px; background: var(--putih);
+  border-radius: 99px; padding: 9px 16px; font-weight: 500;
+}
+.tombol-menu { display: none; background: none; border: 0; cursor: pointer; color: var(--teks); padding: 4px; }
+.tombol-menu .ti { font-size: 22px; }
+
+.panel {
+  background: var(--putih);
+  border-radius: var(--radius);
+  padding: 22px;
+  margin-bottom: 20px;
+  min-width: 0;
+}
+.panel h2 { margin: 0 0 16px; font-size: 15px; font-weight: 600; }
+.panel-header { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.panel-header h2 { margin: 0; }
+.mt { margin-top: 24px !important; }
+.abu { color: var(--abu); font-weight: normal; }
+
+.dua-kolom  { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.tiga-kolom { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+/* Halaman booking: form sempit di kiri, jadwal lebar di kanan */
+.kolom-booking { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(0, 1.7fr); gap: 20px; align-items: start; }
+
+/* ------------------------- DASHBOARD ------------------------- */
+/* Grid 12 kolom. Posisi tiap kartu diatur lewat class d-... */
+.dash-grid {
+  display: grid; grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-template-rows: auto auto; gap: 16px;
+}
+.d-hero     { grid-column: 1 / 5;   grid-row: 1 / 3; }
+.d-uang     { grid-column: 5 / 8;   grid-row: 1; display: flex; flex-direction: column; gap: 16px; }
+.d-rincian  { grid-column: 8 / 11;  grid-row: 1; }
+.d-jadwal   { grid-column: 11 / 13; grid-row: 1; }
+.d-heatmap  { grid-column: 5 / 10;  grid-row: 2; }
+.d-grafik   { grid-column: 10 / 13; grid-row: 2; }
+
+.kartu { background: var(--putih); border-radius: var(--radius); padding: 20px; min-width: 0; }
+.kartu-judul { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.kartu-judul h2 { margin: 0; font-size: 14.5px; font-weight: 500; }
+.ikon-bulat {
+  width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--hover); color: var(--teks); flex-shrink: 0;
+}
+.ikon-bulat .ti { font-size: 15px; vertical-align: 0; }
+a.ikon-bulat { text-decoration: none; }
+a.ikon-bulat:hover { background: var(--aksen-muda); }
+.dua-angka small .ti { font-size: 14px; }
+.angka-besar { font-size: clamp(24px, 2.1vw, 34px); white-space: nowrap; font-weight: 500; letter-spacing: -0.03em; line-height: 1.1; }
+.angka-sedang { font-size: 22px; font-weight: 500; letter-spacing: -0.02em; }
+.tren { display: flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--abu); margin-top: 6px; }
+.tren b { font-weight: 600; color: var(--aksen); }
+.tren.turun b { color: var(--merah); }
+.tren .ti { font-size: 15px; }
+
+/* Kartu hero: foto lapangan + peralatan */
+.d-hero { background: var(--aksen); border-radius: 22px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.hero-foto {
+  flex: 1; min-height: 300px; border-radius: 16px; position: relative; overflow: hidden;
+  background: var(--aksen-tua) center / cover no-repeat;
+}
+.hero-chip {
+  position: absolute; left: 14px; top: 14px; background: rgba(255,255,255,.9); color: var(--teks);
+  border-radius: 99px; padding: 5px 12px; font-size: 12.5px; font-weight: 500;
+}
+.hero-teks {
+  position: absolute; left: 14px; right: 14px; bottom: 14px; color: #fff;
+  background: rgba(11, 63, 51, .72); border-radius: 12px; padding: 10px 14px; font-size: 12.5px;
+}
+.hero-teks strong { display: block; font-size: 16px; font-weight: 500; }
+.hero-alat { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.alat { color: #fff; font-size: 12px; }
+.alat-foto {
+  aspect-ratio: 1; border-radius: 12px; background: #fff center / cover no-repeat; margin-bottom: 6px; position: relative;
+}
+.alat-stok {
+  position: absolute; right: 6px; top: 6px; background: #fff; color: var(--teks);
+  border-radius: 99px; padding: 1px 7px; font-size: 11px; font-weight: 600;
+}
+.alat-stok.rendah { background: var(--merah); color: #fff; }
+.alat b { display: block; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alat span { color: var(--aksen-sedang); }
+
+/* Kartu hijau (pendapatan) */
+.kartu-hijau { background: var(--aksen); color: #fff; }
+.kartu-hijau .kartu-judul h2 { color: #fff; }
+.kartu-hijau .ikon-bulat { background: rgba(255,255,255,.14); color: #fff; }
+.kartu-hijau .tren { color: var(--aksen-sedang); }
+.kartu-hijau .tren b { color: var(--lime); }
+.kartu-hijau .tren.turun b { color: #f7c1c1; }
+/* Saldo kas & diterima di muka: disusun atas-bawah supaya angka jutaan muat */
+.d-uang, .d-uang .kartu { min-width: 0; }
+.dua-angka { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.dua-angka > div + div { border-top: 1px dashed var(--garis-tebal); padding-top: 10px; }
+.dua-angka > div { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.dua-angka small { display: block; color: var(--abu); font-size: 12px; }
+.dua-angka .angka-sedang { font-size: 19px; white-space: nowrap; }
+
+/* Rincian pendapatan per akun: titik warna + nama + nilai + batang tipis.
+   Warna tiap akun sama dengan irisan donut (berfungsi sebagai legenda). */
+.rincian-baris { margin-bottom: 12px; font-size: 12.5px; cursor: default; border-radius: 8px; transition: opacity .15s; }
+.rincian-atas { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.rincian-atas .titik { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
+.rincian-atas span { flex: 1; min-width: 0; color: var(--abu); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rincian-atas b { font-weight: 600; white-space: nowrap; }
+.rincian-atas em { font-style: normal; color: var(--abu-muda); width: 38px; text-align: right; }
+.rincian-batang { height: 6px; border-radius: 99px; background: var(--hover); overflow: hidden; }
+.rincian-batang i { display: block; height: 100%; border-radius: 99px; }
+
+.subjudul { display: block; color: var(--abu); font-size: 12px; margin-top: 2px; }
+
+/* Tren pendapatan harian: kartu mengisi sisa tinggi kolom */
+.kartu-tren { flex: 1; display: flex; flex-direction: column; }
+.tren-ringkas { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+.tren-ringkas small { display: block; color: var(--abu); font-size: 12px; }
+.tren-ringkas b { font-size: 15px; font-weight: 600; white-space: nowrap; }
+.sparkline { flex: 1; min-height: 120px; position: relative; }
+.sparkline svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.sparkline .garis-bantu { stroke: var(--abu-muda); stroke-width: 1; stroke-dasharray: 3 3; }
+.sparkline .label-sumbu { font-size: 10.5px; fill: var(--abu-muda); }
+.sparkline-tip {
+  position: absolute; top: 0; transform: translateX(-50%); pointer-events: none;
+  background: var(--teks); color: #fff; border-radius: 8px; padding: 5px 9px;
+  font-size: 11.5px; white-space: nowrap; line-height: 1.35;
+}
+.sparkline-tip b { display: block; font-weight: 600; }
+
+/* Donut: sorot satu irisan saat disorot (di donut maupun di baris rincian) */
+.donut-wrap { display: flex; justify-content: center; margin-top: 16px; }
+.donut { position: relative; width: 170px; height: 170px; }
+.donut svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.donut circle.irisan { transition: opacity .15s; cursor: pointer; }
+.donut.sorot circle.irisan { opacity: .25; }
+.donut.sorot circle.irisan.aktif { opacity: 1; }
+.dash-rincian-redup .rincian-baris { opacity: .4; }
+.dash-rincian-redup .rincian-baris.aktif { opacity: 1; }
+.donut-tengah {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; pointer-events: none; padding: 0 30px;
+}
+.donut-tengah small { font-size: 11.5px; color: var(--abu); }
+.donut-tengah strong { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; }
+.catatan-kecil { font-size: 12px; color: var(--abu); margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--garis-tebal); }
+
+/* Daftar jadwal berikutnya dengan avatar inisial */
+.sesi { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 12px; background: var(--hover); margin-bottom: 8px; }
+.avatar {
+  width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center;
+  font-size: 12px; font-weight: 600; color: var(--aksen-tua); background: var(--aksen-muda);
+}
+.avatar.emas { background: var(--emas-muda); color: #7a5313; }
+.sesi div { min-width: 0; font-size: 12px; color: var(--abu); line-height: 1.35; }
+.sesi div b { display: block; font-size: 13px; font-weight: 500; color: var(--teks); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Heatmap jam sibuk */
+.heatmap { display: grid; grid-template-columns: 34px repeat(16, minmax(0, 1fr)); gap: 4px; font-size: 10.5px; color: var(--abu-muda); }
+.heatmap .sel { aspect-ratio: 1.25; border-radius: 5px; background: var(--hover); }
+.heatmap .l1 { background: #cfe5dc; } .heatmap .l2 { background: #8fc2b0; }
+.heatmap .l3 { background: #3f8f77; } .heatmap .l4 { background: var(--aksen); }
+.heatmap .hari { display: flex; align-items: center; }
+.heatmap .jam-label { text-align: center; }
+
+/* Grafik batang pemakaian lapangan */
+.grafik-batang { display: flex; align-items: flex-end; gap: 8px; height: 150px; margin-top: 10px; }
+.batang { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 6px; font-size: 11px; color: var(--abu); }
+.batang i {
+  width: 100%; border-radius: 8px 8px 4px 4px; min-height: 4px;
+  background: repeating-linear-gradient(135deg, var(--emas-muda) 0 5px, #ecd4a6 5px 7px);
+}
+.batang.puncak i { background: repeating-linear-gradient(135deg, var(--aksen) 0 5px, #1d7a64 5px 7px); }
+.batang em { font-style: normal; font-weight: 600; color: var(--teks); }
+
+/* ------------------------- FORM ------------------------- */
+label { display: block; margin-bottom: 14px; font-weight: 500; font-size: 13px; color: var(--teks); }
+label.inline { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: normal; color: var(--abu); }
+input, select {
+  display: block; width: 100%; margin-top: 6px; padding: 8px 11px; height: 38px;
+  border: 1px solid var(--garis-tebal); border-radius: 8px; font: inherit; color: var(--teks);
+  background: var(--putih);
+}
+input:hover, select:hover { border-color: var(--abu-muda); }
+label.inline input, .filter input, .filter select { display: inline-block; width: auto; margin: 0; }
+input:focus, select:focus { outline: none; border-color: var(--aksen); box-shadow: 0 0 0 3px var(--aksen-muda); }
+
+.baris { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.baris-tombol { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.tombol {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--garis-tebal);
+  background: var(--putih); color: var(--teks); cursor: pointer; font: inherit; font-weight: 500;
+}
+.tombol:hover { background: var(--hover); }
+.tombol-utama { background: var(--aksen); border-color: var(--aksen); color: #fff; }
+.tombol-utama:hover { background: var(--aksen-tua); }
+.tombol-kecil { height: 28px; padding: 0 10px; font-size: 12px; margin: 1px; }
+.tombol-bahaya { color: var(--merah); }
+.tombol-bahaya:hover { background: var(--merah-bg); }
+.tombol:disabled { opacity: .5; cursor: not-allowed; }
+form .tombol-utama[type="submit"] { width: 100%; height: 40px; }
+
+.bantuan { color: var(--abu); font-size: 12.5px; margin: 12px 0 0; }
+.pratinjau {
+  background: var(--latar); border: 1px solid var(--garis); border-radius: 8px;
+  padding: 12px 14px; margin-bottom: 14px; font-size: 13px; line-height: 1.7;
+}
+.pratinjau.error { background: var(--merah-bg); border-color: #f7c1c1; color: var(--merah); }
+.pratinjau.ok    { background: var(--hijau-bg); border-color: #9fe1cb; color: var(--hijau); }
+
+/* ------------------------- TABEL ------------------------- */
+.tabel-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 10px 12px; border-bottom: 1px solid var(--garis); text-align: left; vertical-align: middle; }
+th { font-size: 12px; font-weight: 500; color: var(--abu); white-space: nowrap; border-bottom-color: var(--garis-tebal); }
+tbody tr:hover td { background: #fbfbfa; }
+.angka { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.kosong { text-align: center; color: var(--abu-muda); padding: 28px; }
+
+/* Jurnal: akun kredit menjorok ke kanan (aturan penulisan jurnal) */
+.tabel-akuntansi td { border-bottom: 0; padding-top: 6px; padding-bottom: 6px; }
+.tabel-akuntansi .baris-header td { border-top: 1px solid var(--garis); padding-top: 12px; }
+.tabel-akuntansi .akun-kredit { padding-left: 40px; }
+.tabel-akuntansi tfoot td, .total td {
+  font-weight: 600; background: var(--latar); border-top: 1px solid var(--garis-tebal); border-bottom: 0;
+}
+
+/* ------------------------- JADWAL LAPANGAN ------------------------- */
+/* Grid: baris = jam, kolom = lapangan. Blok berwarna sesuai status. */
+.jadwal { border-collapse: separate; border-spacing: 4px; }
+.jadwal th, .jadwal td { border: 0; text-align: center; font-size: 12px; padding: 7px 6px; }
+.jadwal thead th { color: var(--teks); }
+.jadwal tbody th { color: var(--abu-muda); font-weight: 500; width: 56px; }
+.jadwal tbody tr:hover td { background: none; }
+.jadwal td { border-radius: var(--radius-kecil); font-weight: 500; }
+.jadwal td.slot-kosong { background: var(--latar); color: transparent; cursor: pointer; }
+.jadwal td.slot-kosong:hover { background: var(--aksen-muda); color: var(--aksen); }
+.jadwal td.slot-kosong:hover::after { content: "+ booking"; }
+.slot-menunggu, .slot-dp { background: var(--kuning-bg); color: var(--kuning); }
+.slot-lunas   { background: var(--biru-bg);   color: var(--biru); }
+.slot-selesai { background: var(--hijau-bg);  color: var(--hijau); }
+.slot-member  { background: var(--ungu-bg);   color: var(--ungu); }
+
+.legenda { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--abu); margin-bottom: 12px; }
+.legenda span { display: inline-flex; align-items: center; gap: 6px; }
+.legenda i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.okupansi { font-size: 12.5px; color: var(--aksen); background: var(--aksen-muda); padding: 3px 10px; border-radius: 99px; font-weight: 500; }
+
+/* Label status */
+.badge {
+  display: inline-block; padding: 2px 9px; border-radius: 99px;
+  font-size: 11.5px; font-weight: 500; white-space: nowrap;
+}
+.badge-menunggu, .badge-dp, .badge-dipinjam { background: var(--kuning-bg); color: var(--kuning); }
+.badge-lunas, .badge-pelunasan               { background: var(--biru-bg);   color: var(--biru); }
+.badge-selesai, .badge-dikembalikan          { background: var(--hijau-bg);  color: var(--hijau); }
+.badge-batal, .badge-rusak                   { background: var(--merah-bg);  color: var(--merah); }
+.badge-member                                { background: var(--ungu-bg);   color: var(--ungu); }
+.badge .ti { font-size: 12px; vertical-align: -1px; }
+.stok-rendah { color: var(--merah); font-weight: 600; }
+
+/* Grafik batang sederhana di dashboard */
+.bar-baris { margin-bottom: 14px; }
+.bar-label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
+.bar-label span { color: var(--abu); }
+.bar-latar { background: var(--hover); border-radius: 99px; height: 8px; }
+.bar-isi   { background: var(--aksen); border-radius: 99px; height: 8px; min-width: 3px; }
+
+/* Laporan */
+.laporan h3 { margin: 24px 0 10px; font-size: 14px; font-weight: 600; }
+.kop-laporan { text-align: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--garis); }
+.kop-laporan h3 { margin: 0; font-size: 16px; letter-spacing: .04em; }
+.kop-laporan p  { margin: 2px 0; color: var(--abu); }
+
+/* ------------------------- ALERT, DIALOG, TOAST ------------------------- */
+.alert { padding: 12px 16px; border-radius: var(--radius); margin-bottom: 20px; }
+.alert-peringatan { background: var(--kuning-bg); color: var(--kuning); border: 1px solid #fac775; }
+
+dialog { border: 1px solid var(--garis); border-radius: 12px; padding: 24px; width: min(420px, 92vw); color: var(--teks); }
+dialog::backdrop { background: rgba(20, 20, 18, .35); }
+dialog h2 { margin: 0; font-size: 16px; }
+dialog .panel-header { margin-bottom: 18px; }
+dialog .baris .tombol { width: 100%; height: 40px; }
+dialog > form > h2 { margin-bottom: 14px; }
+/* Padding di form (bukan di dialog) supaya klik di luar kotak = klik di <dialog> */
+#dialog-paket { width: min(460px, 92vw); padding: 0; }
+#dialog-paket form { padding: 24px; }
+
+.toast {
+  position: fixed; right: 24px; bottom: 24px; max-width: 380px;
+  background: var(--teks); color: #fff; padding: 12px 16px; border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.15); opacity: 0; transform: translateY(8px);
+  transition: .2s; pointer-events: none; z-index: 50;
+}
+.toast.tampil { opacity: 1; transform: none; }
+.toast.error  { background: var(--merah); }
+
+/* ------------------------- RESPONSIF (HP / TABLET) ------------------------- */
+@media (max-width: 1280px) {
+  /* Layar lebih kecil: dashboard jadi 2 kolom, kartu mengalir otomatis */
+  .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dash-grid > * { grid-column: auto; grid-row: auto; }
+  .d-hero { grid-row: span 2; }
+  .d-heatmap { grid-column: 1 / -1; }
+  .tiga-kolom { grid-template-columns: 1fr; }
+}
+@media (max-width: 800px) {
+  .dua-kolom, .kolom-booking, .dash-grid { grid-template-columns: 1fr; }
+  .d-hero { grid-row: auto; }
+  .konten { padding: 16px; }
+  .tombol-menu { display: block; }
+  .sidebar {
+    position: fixed; left: 0; top: 0; z-index: 40; margin: 0; height: 100vh; border-radius: 0;
+    transform: translateX(-100%); transition: transform .25s;
+  }
+  .sidebar.buka { transform: none; box-shadow: 0 0 40px rgba(0,0,0,.15); }
+}
+@media (max-width: 520px) {
+  .heatmap { font-size: 9px; gap: 2px; }
+  .baris { grid-template-columns: 1fr; }
+  .tanggal-hari-ini { display: none; }
+}
+
+/* ==================================================================
+   ANIMASI & INTERAKSI (dipakai bersama js/animasi.js)
+   Hanya menganimasikan transform & opacity supaya ringan.
+   ================================================================== */
+:root { --halus: cubic-bezier(.2, .7, .2, 1); }
+
+/* 1. Kartu/panel muncul berurutan saat pindah menu */
+@keyframes muncul-naik { from { opacity: 0; transform: translateY(12px); } }
+.muncul { animation: muncul-naik .45s var(--halus) both; animation-delay: calc(var(--urutan, 0) * 60ms); }
+
+/* 2. Kartu dashboard terangkat sedikit saat disorot */
+.kartu, .d-hero { transition: transform .2s var(--halus), box-shadow .2s var(--halus); }
+.kartu:hover, .d-hero:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(20, 60, 50, .08); }
+.ikon-bulat .ti { transition: transform .2s var(--halus); }
+a.ikon-bulat:hover .ti { transform: translate(2px, -2px); }
+
+/* Foto lapangan membesar pelan saat disorot */
+.hero-gambar { position: absolute; inset: 0; background: center / cover no-repeat; transition: transform .8s var(--halus); }
+.d-hero:hover .hero-gambar { transform: scale(1.05); }
+.hero-chip, .hero-teks { z-index: 1; }
+.alat-foto { transition: transform .25s var(--halus); }
+.alat:hover .alat-foto { transform: translateY(-3px); }
+
+/* Indikator menu aktif yang meluncur */
+.menu { position: relative; }
+.menu a { position: relative; z-index: 1; transition: color .2s, background .2s; }
+.menu a.aktif, .menu a.aktif:hover { background: transparent; color: #fff; }
+.menu-indikator {
+  position: absolute; left: 0; right: 0; top: 0; z-index: 0;
+  background: var(--aksen); border-radius: 99px; opacity: 0; pointer-events: none;
+}
+.menu-indikator.siap { transition: transform .35s var(--halus), height .35s var(--halus), opacity .2s; }
+
+/* Modal membesar + memudar saat dibuka */
+@keyframes modal-masuk { from { opacity: 0; transform: translateY(8px) scale(.97); } }
+@keyframes pudar-masuk { from { opacity: 0; } }
+dialog[open] { animation: modal-masuk .22s var(--halus); }
+dialog[open]::backdrop { animation: pudar-masuk .22s ease-out; }
+
+/* 3. Tombol Simpan: putaran loading */
+@keyframes putar { to { transform: rotate(360deg); } }
+.tombol.memuat { position: relative; color: transparent !important; opacity: 1; cursor: wait; }
+.tombol.memuat::after {
+  content: ""; position: absolute; inset: 0; margin: auto; width: 16px; height: 16px;
+  border: 2px solid rgba(24, 38, 31, .2); border-top-color: var(--teks); border-radius: 50%;
+  animation: putar .7s linear infinite;
+}
+.tombol-utama.memuat::after { border-color: rgba(255, 255, 255, .35); border-top-color: #fff; }
+
+/* Form bergetar pelan saat ditolak */
+@keyframes getar {
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+.getar { animation: getar .4s ease-in-out; }
+
+/* Baris baru berkedip hijau, slot jadwal baru "pop" */
+@keyframes sorot-hijau { from { background: #cdeadf; } }
+.baris-baru td { animation: sorot-hijau 1.8s ease-out; }
+@keyframes pop { 0% { transform: scale(.6); opacity: 0; } 70% { transform: scale(1.06); } }
+.jadwal td.pop { animation: pop .45s var(--halus); }
+
+/* Skeleton loading: kotak abu-abu berkilau selama data dimuat */
+@keyframes kilau { to { background-position: -200% 0; } }
+.skeleton {
+  display: inline-block; min-width: 70px; min-height: 12px; border-radius: 6px;
+  color: transparent !important;
+  background: linear-gradient(90deg, #e8efec 25%, #f5f9f7 50%, #e8efec 75%) 0 0 / 200% 100%;
+  animation: kilau 1.3s linear infinite;
+}
+.skeleton-baris .skeleton { width: 75%; }
+.skeleton-blok { display: block; width: 100%; }
+.angka-besar.skeleton, .angka-sedang.skeleton { min-width: 140px; }
+
+/* Grafik "tumbuh" */
+@keyframes tumbuh-y { from { transform: scaleY(0); } }
+@keyframes tumbuh-x { from { transform: scaleX(0); } }
+@keyframes sel-muncul { from { opacity: 0; transform: scale(.5); } }
+.batang i { transform-origin: bottom; animation: tumbuh-y .6s var(--halus) both; animation-delay: calc(var(--urutan, 0) * 60ms); }
+.rincian-batang i { transform-origin: left; animation: tumbuh-x .7s var(--halus) both; }
+.heatmap .sel { animation: sel-muncul .35s var(--halus) both; animation-delay: calc(var(--urutan, 0) * 14ms); }
+.donut circle.irisan { transition: stroke-dasharray .9s var(--halus), opacity .15s; }
+@keyframes gambar-garis { from { stroke-dashoffset: 1; } }
+.sparkline .garis-animasi { stroke-dasharray: 1; animation: gambar-garis 1s var(--halus) both; }
+.sparkline .area-animasi { animation: pudar-masuk .8s ease-out both .3s; }
+
+/* Hormati pengaturan "kurangi gerakan" di sistem operasi */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important; animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important; transition-duration: .01ms !important;
+  }
+  .skeleton { animation: none; }
+}
+
+/* ------------------------- CETAK ------------------------- */
+@media print {
+  body { background: #fff; display: block; }
+  .sidebar, .topbar, .filter, .toast, .alert, .bantuan { display: none !important; }
+  .panel { border: 0; padding: 0; }
+  .konten { padding: 0; }
+}
