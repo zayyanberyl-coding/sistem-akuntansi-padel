@@ -58,12 +58,38 @@ language sql immutable as $$
                        else '1-101' end;
 $$;
 
--- Validasi tanggal transaksi yang diisi pengguna aplikasi:
+-- Apakah bulan dari tanggal ini sudah ditutup (tutup buku)?
+create or replace function periode_tertutup(p_tanggal date) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from tutup_buku where periode = date_trunc('month', p_tanggal)::date);
+$$;
+
+-- Tanggal untuk jurnal OTOMATIS yang terlambat (pengakuan pendapatan, breakage):
+-- bila bulannya sudah ditutup, digeser ke tanggal 1 bulan berikutnya yang masih
+-- terbuka, supaya laporan bulan yang sudah ditutup tidak berubah.
+create or replace function tanggal_jurnal_terbuka(p_tanggal date) returns date
+language plpgsql stable security definer set search_path = public as $$
+declare
+  v_tanggal date := p_tanggal;
+begin
+  while periode_tertutup(v_tanggal) loop
+    v_tanggal := (date_trunc('month', v_tanggal) + interval '1 month')::date;
+  end loop;
+  return v_tanggal;
+end;
+$$;
+
+-- Validasi tanggal transaksi yang diisi pengguna:
+--   - tidak boleh jatuh di bulan yang sudah ditutup (berlaku untuk semua)
 --   - tidak boleh di masa depan
 --   - mundur lebih dari 3 hari hanya boleh oleh owner
 create or replace function cek_tanggal_transaksi(p_tanggal date, p_label text) returns void
 language plpgsql stable security definer set search_path = public as $$
 begin
+  if periode_tertutup(p_tanggal) then
+    raise exception 'Periode % sudah ditutup (tutup buku); tanggal % tidak bisa memakai bulan tersebut',
+      to_char(p_tanggal, 'MM-YYYY'), p_label;
+  end if;
   if auth.uid() is null then
     return;   -- dijalankan dari SQL Editor (data contoh)
   end if;
@@ -98,6 +124,13 @@ begin
     return null;
   end if;
 
+  -- Lapisan pengaman terakhir: tidak ada jurnal yang boleh masuk ke bulan
+  -- yang sudah ditutup, dari jalur mana pun.
+  if periode_tertutup(p_tanggal) then
+    raise exception 'Periode % sudah ditutup (tutup buku); jurnal tidak bisa dicatat di bulan tersebut',
+      to_char(p_tanggal, 'MM-YYYY');
+  end if;
+
   insert into jurnal (tanggal, keterangan, sumber, sumber_id, dibuat_oleh)
   values (p_tanggal, p_keterangan, p_sumber, p_sumber_id, auth.uid())
   returning id into v_id;
@@ -118,6 +151,8 @@ $$;
 revoke execute on function buat_jurnal(date, text, text, bigint, text, text, numeric)
   from public, anon, authenticated;
 revoke execute on function cek_tanggal_transaksi(date, text) from public, anon, authenticated;
+revoke execute on function periode_tertutup(date)          from public, anon, authenticated;
+revoke execute on function tanggal_jurnal_terbuka(date)    from public, anon, authenticated;
 
 
 -- ---------------------------------------------------------------------
@@ -440,6 +475,7 @@ language plpgsql security definer set search_path = public as $$
 declare
   v_dibayar    numeric;
   v_keterangan text;
+  v_tgl_jurnal date;
 begin
   if new.status = old.status then
     return new;
@@ -456,12 +492,14 @@ begin
   values (new.id, old.status, new.status, v_keterangan, auth.uid());
 
   if new.status = 'selesai' then
+    -- Biasanya bertanggal hari main; digeser bila bulannya sudah ditutup
+    v_tgl_jurnal := tanggal_jurnal_terbuka(new.tanggal);
     perform buat_jurnal(
-      new.tanggal,
+      v_tgl_jurnal,
       case when new.pembelian_paket_id is null
            then 'Pengakuan pendapatan sewa lapangan ' || new.kode_booking
            else 'Pengakuan pendapatan paket member (' || new.durasi_jam || ' jam) ' || new.kode_booking
-      end,
+      end || case when v_tgl_jurnal <> new.tanggal then ' (diakui terlambat)' else '' end,
       'booking', new.id,
       '2-101', '4-101', new.total_harga);
 
@@ -835,6 +873,7 @@ declare
   v_terpakai numeric;
   v_sisa     numeric;
   v_jumlah   int := 0;
+  v_tgl      date;
 begin
   if auth.uid() is not null and peran_saya() is null then
     raise exception 'Akses ditolak';
@@ -853,10 +892,13 @@ begin
     v_sisa := v_paket.harga - v_terpakai;
 
     if v_sisa > 0 then
+      -- Bertanggal hari kedaluwarsa; digeser bila bulannya sudah ditutup
+      v_tgl := tanggal_jurnal_terbuka(v_paket.tanggal_kadaluarsa);
       perform buat_jurnal(
-        v_paket.tanggal_kadaluarsa,
+        v_tgl,
         'Pengakuan sisa ' || v_paket.nama_paket || ' kedaluwarsa - ' || v_paket.nama_pelanggan
-          || ' (' || (v_paket.jam_total - v_paket.jam_terpakai) || ' jam tidak terpakai)',
+          || ' (' || (v_paket.jam_total - v_paket.jam_terpakai) || ' jam tidak terpakai)'
+          || case when v_tgl <> v_paket.tanggal_kadaluarsa then ' (diakui terlambat)' else '' end,
         'pembelian_paket', v_paket.id,
         '2-101', '4-104', v_sisa);
       v_jumlah := v_jumlah + 1;
@@ -900,3 +942,77 @@ $$;
 
 revoke execute on function selesaikan_booking_lewat_waktu() from public, anon;
 grant  execute on function selesaikan_booking_lewat_waktu() to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 16. TUTUP BUKU (owner saja)
+--     Menutup satu bulan yang SUDAH BERAKHIR. Setelah ditutup, tanggal di
+--     bulan itu tidak bisa dipakai transaksi maupun jurnal (lihat
+--     cek_tanggal_transaksi & buat_jurnal), sehingga laporannya final.
+--     Syarat: semua booking di bulan itu sudah selesai / batal.
+--     Sebelum menutup, sisa paket member yang kedaluwarsa diakui dulu.
+-- ---------------------------------------------------------------------
+create or replace function tutup_periode(p_periode date) returns text
+language plpgsql security definer set search_path = public as $$
+declare
+  v_awal  date := date_trunc('month', p_periode)::date;
+  v_akhir date := (date_trunc('month', p_periode) + interval '1 month' - interval '1 day')::date;
+  v_sisa  int;
+begin
+  if auth.uid() is not null and coalesce(peran_saya(), '') <> 'owner' then
+    raise exception 'Tutup buku hanya boleh dilakukan oleh owner';
+  end if;
+  if v_awal >= date_trunc('month', hari_ini_wib())::date then
+    raise exception 'Hanya bulan yang sudah berakhir yang bisa ditutup';
+  end if;
+  if periode_tertutup(v_awal) then
+    raise exception 'Periode % sudah ditutup', to_char(v_awal, 'MM-YYYY');
+  end if;
+
+  select count(*) into v_sisa
+  from booking
+  where tanggal between v_awal and v_akhir
+    and status in ('menunggu', 'dp', 'lunas');
+  if v_sisa > 0 then
+    raise exception 'Masih ada % booking pada % yang belum dituntaskan (selesaikan atau batalkan dulu)',
+      v_sisa, to_char(v_awal, 'MM-YYYY');
+  end if;
+
+  perform akui_breakage_paket();
+
+  insert into tutup_buku (periode, ditutup_oleh) values (v_awal, auth.uid());
+  insert into riwayat_tutup_buku (periode, aksi, oleh) values (v_awal, 'tutup', auth.uid());
+  return to_char(v_awal, 'MM-YYYY');
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
+-- 17. BUKA KEMBALI PERIODE (owner saja, wajib alasan, tercatat di riwayat)
+-- ---------------------------------------------------------------------
+create or replace function buka_periode(p_periode date, p_alasan text) returns text
+language plpgsql security definer set search_path = public as $$
+declare
+  v_awal date := date_trunc('month', p_periode)::date;
+begin
+  if auth.uid() is not null and coalesce(peran_saya(), '') <> 'owner' then
+    raise exception 'Membuka kembali periode hanya boleh dilakukan oleh owner';
+  end if;
+  if length(trim(coalesce(p_alasan, ''))) < 5 then
+    raise exception 'Alasan membuka kembali periode wajib diisi (minimal 5 karakter)';
+  end if;
+  if not periode_tertutup(v_awal) then
+    raise exception 'Periode % belum ditutup', to_char(v_awal, 'MM-YYYY');
+  end if;
+
+  delete from tutup_buku where periode = v_awal;
+  insert into riwayat_tutup_buku (periode, aksi, alasan, oleh)
+  values (v_awal, 'buka', trim(p_alasan), auth.uid());
+  return to_char(v_awal, 'MM-YYYY');
+end;
+$$;
+
+revoke execute on function tutup_periode(date)       from public, anon;
+revoke execute on function buka_periode(date, text)  from public, anon;
+grant  execute on function tutup_periode(date)       to authenticated;
+grant  execute on function buka_periode(date, text)  to authenticated;

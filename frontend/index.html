@@ -668,6 +668,40 @@
         </div>
         <div id="lp-isi" class="laporan"></div>
       </div>
+
+      <!-- Tutup buku: semua staf melihat status; tombol hanya untuk owner -->
+      <div class="panel sembunyi-cetak">
+        <div class="panel-header">
+          <h2>Tutup Buku</h2>
+          <div class="filter khusus-owner">
+            <label class="inline">Bulan <input type="month" id="tb-bulan"></label>
+            <button class="tombol tombol-utama" id="tb-tutup" type="button"><i class="ti ti-lock"></i> Tutup buku</button>
+          </div>
+        </div>
+        <p class="bantuan">Bulan yang sudah ditutup tidak bisa lagi menerima transaksi atau jurnal, sehingga laporannya final.
+          Syarat: bulan sudah berakhir dan semua booking di bulan itu sudah selesai / batal.
+          Jurnal otomatis yang terlambat (misalnya sisa paket kedaluwarsa) dicatat di bulan berikutnya yang masih terbuka.</p>
+        <div class="dua-kolom">
+          <div>
+            <h3>Periode ditutup</h3>
+            <div class="tabel-wrap">
+              <table>
+                <thead><tr><th>Periode</th><th>Ditutup oleh</th><th>Waktu</th><th class="khusus-owner">Aksi</th></tr></thead>
+                <tbody id="tb-daftar"></tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <h3>Riwayat</h3>
+            <div class="tabel-wrap">
+              <table>
+                <thead><tr><th>Waktu</th><th>Periode</th><th>Aksi</th><th>Oleh</th><th>Alasan</th></tr></thead>
+                <tbody id="tb-riwayat"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
   </main>
 

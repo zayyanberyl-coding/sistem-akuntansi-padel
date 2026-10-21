@@ -70,7 +70,17 @@ Penguji: ____________________ Tanggal: ____________ Browser/perangkat: _________
 | F2 | Laporan periode bulan ini | Pendapatan per akun + penerimaan per metode (Kas/Bank/QRIS) tampil | |
 | F3 | Cetak laporan | Tampilan cetak rapi, tanpa sidebar | |
 
+## G. Tutup buku (menu Laporan)
+
+| No | Langkah | Hasil yang diharapkan | Hasil |
+|---|---|---|---|
+| G1 | (admin) Buka menu Laporan | Panel Tutup Buku tampil tanpa tombol tutup / buka kembali | |
+| G2 | (owner) Tutup buku bulan lalu | Bulan lalu tampil di "Periode ditutup" dan di Riwayat | |
+| G3 | (owner) Catat pembayaran bertanggal bulan yang ditutup | Ditolak: periode sudah ditutup | |
+
+> Setelah G2, buka kembali bulan tersebut (isi alasan) atau jalankan ulang 4 file SQL agar data demo kembali normal.
+
 ---
 
-**Ringkasan:** ____ dari 28 langkah sesuai harapan.
+**Ringkasan:** ____ dari 31 langkah sesuai harapan.
 Catatan / temuan: ____________________________________________________________

@@ -6,6 +6,7 @@
       -> bahan rekonsiliasi dengan uang di laci, rekening koran, laporan QRIS
    D. Saldo Pendapatan Diterima di Muka (uang diterima, belum diakui)
    Angka per akun diambil dari view v_mutasi_harian (dijumlah di server).
+   E. Tutup buku per bulan (owner) + riwayatnya
    ================================================================== */
 
 function siapkanLaporan() {
@@ -13,9 +14,19 @@ function siapkanLaporan() {
   $('lp-sampai').value = hariIni();
   $('lp-tampil').addEventListener('click', muatLaporan);
   $('lp-cetak').addEventListener('click', () => window.print());
+
+  // Bulan yang diusulkan untuk ditutup: bulan lalu
+  $('tb-bulan').value = tambahHari(awalBulan(), -1).slice(0, 7);
+  $('tb-bulan').max = $('tb-bulan').value;
+  $('tb-tutup').addEventListener('click', tutupBuku);
+  $('tb-daftar').addEventListener('click', (e) => {
+    const tombol = e.target.closest('[data-buka]');
+    if (tombol) bukaKembaliPeriode(tombol.dataset.buka);
+  });
 }
 
 async function muatLaporan() {
+  muatTutupBuku();   // panel tutup buku dimuat bersamaan (tidak perlu ditunggu)
   const dari = $('lp-dari').value;
   const sampai = $('lp-sampai').value;
 
@@ -141,4 +152,74 @@ async function muatLaporan() {
       tetapi lapangannya belum dipakai, sehingga masih dicatat sebagai kewajiban
       (belum menjadi pendapatan). Penerimaan kas pada bagian C tidak sama dengan
       pendapatan pada bagian A karena pendapatan diakui saat jasa diberikan, bukan saat uang diterima.</p>`;
+}
+
+
+/* ------------------------------------------------------------------
+   E. TUTUP BUKU
+   Aturan sebenarnya dijaga database (fungsi tutup_periode & buka_periode):
+   hanya owner, hanya bulan yang sudah berakhir, semua booking tuntas.
+   ------------------------------------------------------------------ */
+
+// "2026-09-01" -> "September 2026"
+function namaBulan(teks) {
+  return keDate(teks).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+}
+
+// Cap waktu dari database (UTC) -> waktu lokal, contoh "21 Okt 2026, 23.40"
+function waktuIndo(teks) {
+  return new Date(teks).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+async function muatTutupBuku() {
+  const [resTutup, resRiwayat] = await Promise.all([
+    db.from('v_tutup_buku').select('*').order('periode', { ascending: false }),
+    db.from('v_riwayat_tutup_buku').select('*').order('waktu', { ascending: false }).limit(20)
+  ]);
+  if (adaError(resTutup.error) || adaError(resRiwayat.error)) return;
+
+  $('tb-daftar').innerHTML = resTutup.data.map(t => `
+    <tr>
+      <td><span class="badge badge-tutup"><i class="ti ti-lock"></i> ${esc(namaBulan(t.periode))}</span></td>
+      <td>${esc(t.nama_pengguna || '-')}</td>
+      <td>${waktuIndo(t.ditutup_pada)}</td>
+      <td class="khusus-owner"><button class="tombol tombol-kecil" type="button" data-buka="${esc(t.periode)}">Buka kembali</button></td>
+    </tr>`).join('') || barisKosong(4, 'Belum ada bulan yang ditutup');
+
+  $('tb-riwayat').innerHTML = resRiwayat.data.map(r => `
+    <tr>
+      <td>${waktuIndo(r.waktu)}</td>
+      <td>${esc(namaBulan(r.periode))}</td>
+      <td>${badge(r.aksi)}</td>
+      <td>${esc(r.nama_pengguna || '-')}</td>
+      <td>${esc(r.alasan || '-')}</td>
+    </tr>`).join('') || barisKosong(5, 'Belum ada riwayat');
+}
+
+async function tutupBuku() {
+  const bulan = $('tb-bulan').value;               // format "YYYY-MM"
+  if (!bulan) return tampilkanPesan('Pilih bulan yang akan ditutup', 'error');
+  const periode = bulan + '-01';
+  if (!confirm(`Tutup buku ${namaBulan(periode)}?\n\n` +
+    'Setelah ditutup, tidak ada transaksi atau jurnal yang bisa dicatat pada bulan tersebut. ' +
+    'Sisa paket member yang kedaluwarsa akan diakui terlebih dahulu.')) return;
+
+  const tombol = $('tb-tutup');
+  tombol.classList.add('memuat');
+  tombol.disabled = true;
+  const { error } = await db.rpc('tutup_periode', { p_periode: periode });
+  tombol.classList.remove('memuat');
+  tombol.disabled = false;
+  if (adaError(error)) return getarkan(tombol);
+  tampilkanPesan(`Buku ${namaBulan(periode)} berhasil ditutup.`);
+  muatTutupBuku();
+}
+
+async function bukaKembaliPeriode(periode) {
+  const alasan = prompt(`Alasan membuka kembali ${namaBulan(periode)} (wajib, akan tercatat di riwayat):`);
+  if (alasan === null) return;                     // pengguna menekan Batal
+  const { error } = await db.rpc('buka_periode', { p_periode: periode, p_alasan: alasan });
+  if (adaError(error)) return;
+  tampilkanPesan(`${namaBulan(periode)} dibuka kembali.`);
+  muatTutupBuku();
 }

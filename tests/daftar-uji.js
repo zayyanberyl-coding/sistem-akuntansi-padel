@@ -39,6 +39,25 @@ async function harapDitolak(q, sql, pola) {
 // Tanggal hari Selasa (hari kerja) sekitar 30 hari lagi — bebas dari data seed
 const SELASA = `(current_date + 30 + ((9 - extract(isodow from current_date + 30)::int) % 7))::date`;
 
+// ---- Bantuan uji tutup buku ----
+const BULAN_LALU = `(date_trunc('month', current_date) - interval '1 month')::date`;
+const AKHIR_BULAN_LALU = `(date_trunc('month', current_date) - interval '1 day')::date`;
+const UID = { owner: '00000000-0000-0000-0000-000000000001', admin: '00000000-0000-0000-0000-000000000002' };
+
+// Di tengah uji 'sistem': mulai bertindak sebagai pengguna login (owner/admin)
+async function jadiPengguna(q, peran) {
+  await q(`set local role authenticated`);
+  await q(`select set_config('request.jwt.claim.sub', '${UID[peran]}', true)`);
+}
+
+// Persiapan (sebagai superuser): tuntaskan semua booking bulan lalu yang belum
+// selesai/batal, supaya bulan lalu memenuhi syarat untuk ditutup.
+async function tuntaskanBulanLalu(q) {
+  await q(`update booking set status = 'selesai' where status = 'lunas' and tanggal < date_trunc('month', current_date)`);
+  await q(`update booking set status = 'batal', alasan_batal = 'persiapan uji'
+           where status in ('menunggu', 'dp') and tanggal < date_trunc('month', current_date)`);
+}
+
 export const daftarUji = [
 
   // ---------------------------------------------------------------
@@ -324,6 +343,106 @@ export const daftarUji = [
                            where p.nama = 'Teguh Prasetyo' and pp.breakage_diakui`);
       return { lulus: !!r && Number(r.nilai_breakage) > 0 && Number(r.jurnal) === Number(r.nilai_breakage),
                info: r ? `sisa ${r.sisa_jam} jam = ${rp(r.nilai_breakage)}; jurnal 4-104 ${rp(r.jurnal || 0)}` : 'paket tidak ditemukan' };
+    }
+  },
+
+  // ---------------------------------------------------------------
+  // F. TUTUP BUKU (kunci periode)
+  // ---------------------------------------------------------------
+  {
+    kelompok: 'F. Tutup buku', nama: 'Admin tidak bisa menutup buku', sebagai: 'admin',
+    jalankan: (q) => harapDitolak(q, `select tutup_periode(${BULAN_LALU})`, 'hanya boleh dilakukan oleh owner')
+  },
+  {
+    kelompok: 'F. Tutup buku', nama: 'Bulan berjalan tidak bisa ditutup', sebagai: 'owner',
+    jalankan: (q) => harapDitolak(q, `select tutup_periode(current_date)`, 'sudah berakhir')
+  },
+  {
+    kelompok: 'F. Tutup buku', nama: 'Bulan yang masih punya booking belum tuntas tidak bisa ditutup', sebagai: 'sistem',
+    jalankan: async (q) => {
+      await tuntaskanBulanLalu(q);
+      // satu booking bulan lalu yang belum dibayar (dibuat dari SQL Editor),
+      // di lapangan khusus uji supaya pasti tidak bentrok dengan data seed
+      await q(`insert into lapangan (nama, tarif_normal, tarif_prime) values ('Court Uji', 100000, 100000)`);
+      await q(`insert into booking (pelanggan_id, lapangan_id, tanggal, jam_mulai, jam_selesai)
+               select 1, id, ${AKHIR_BULAN_LALU}, '07:00', '08:00' from lapangan where nama = 'Court Uji'`);
+      await jadiPengguna(q, 'owner');
+      return harapDitolak(q, `select tutup_periode(${BULAN_LALU})`, 'belum dituntaskan');
+    }
+  },
+  {
+    kelompok: 'F. Tutup buku', nama: 'Owner menutup bulan lalu: tercatat beserta riwayatnya', sebagai: 'sistem',
+    jalankan: async (q) => {
+      await tuntaskanBulanLalu(q);
+      await jadiPengguna(q, 'owner');
+      const [h] = await q(`select tutup_periode(${BULAN_LALU}) periode`);
+      const [t] = await q(`select count(*) n, max(ditutup_oleh::text) oleh from tutup_buku`);
+      const [r] = await q(`select aksi from riwayat_tutup_buku order by id desc limit 1`);
+      return { lulus: Number(t.n) === 1 && t.oleh === UID.owner && r?.aksi === 'tutup',
+               info: `periode ${h.periode} ditutup oleh owner; riwayat "${r?.aksi}"` };
+    }
+  },
+  {
+    kelompok: 'F. Tutup buku', nama: 'Setelah ditutup: pembayaran bertanggal bulan itu ditolak (walau oleh owner)', sebagai: 'sistem',
+    jalankan: async (q) => {
+      await tuntaskanBulanLalu(q);
+      await jadiPengguna(q, 'owner');
+      await q(`select tutup_periode(${BULAN_LALU})`);
+      return harapDitolak(q, `insert into pembayaran (booking_id, tanggal, jumlah, metode_bayar)
+                              values (6, ${AKHIR_BULAN_LALU}, 100000, 'tunai')`, 'sudah ditutup');
+    }
+  },
+  {
+    kelompok: 'F. Tutup buku', nama: 'Lapisan terakhir: buat_jurnal() menolak tanggal di bulan tertutup', sebagai: 'sistem',
+    jalankan: async (q) => {
+      await tuntaskanBulanLalu(q);
+      await q(`select tutup_periode(${BULAN_LALU})`);       // dari SQL Editor (superuser)
+      return harapDitolak(q, `select buat_jurnal(${AKHIR_BULAN_LALU}, 'uji', 'manual', 1, '1-101', '4-201', 1000)`,
+        'sudah ditutup');
+    }
+  },
+  {
+    kelompok: 'F. Tutup buku', nama: 'Jurnal otomatis terlambat digeser ke bulan terbuka (breakage)', sebagai: 'sistem',
+    jalankan: async (q) => {
+      await tuntaskanBulanLalu(q);
+      await q(`select tutup_periode(${BULAN_LALU})`);
+      // Paket dibeli ±50 hari sebelum awal bulan ini -> kedaluwarsa di bulan lalu (sudah ditutup)
+      await q(`insert into pembelian_paket (pelanggan_id, paket_id, tanggal_beli, metode_bayar)
+               values (2, 1, (date_trunc('month', current_date) - interval '50 days')::date, 'tunai')`);
+      await jadiPengguna(q, 'owner');
+      await q(`select akui_breakage_paket()`);
+      const [j] = await q(`select j.tanggal::text tanggal, j.keterangan, pp.tanggal_kadaluarsa::text kedaluwarsa,
+                                  date_trunc('month', current_date)::date::text awal_bulan_ini
+                           from jurnal j join pembelian_paket pp on pp.id = j.sumber_id
+                           where j.sumber = 'pembelian_paket' and j.keterangan like 'Pengakuan sisa%'
+                             and pp.id = (select max(id) from pembelian_paket)`);
+      return { lulus: !!j && j.tanggal === j.awal_bulan_ini && j.keterangan.includes('(diakui terlambat)'),
+               info: j ? `kedaluwarsa ${j.kedaluwarsa} → dijurnal ${j.tanggal}: "${j.keterangan}"` : 'jurnal tidak ditemukan' };
+    }
+  },
+  {
+    kelompok: 'F. Tutup buku', nama: 'Admin tidak bisa membuka kembali periode', sebagai: 'sistem',
+    jalankan: async (q) => {
+      await tuntaskanBulanLalu(q);
+      await q(`select tutup_periode(${BULAN_LALU})`);
+      await jadiPengguna(q, 'admin');
+      return harapDitolak(q, `select buka_periode(${BULAN_LALU}, 'salah tutup')`, 'hanya boleh dilakukan oleh owner');
+    }
+  },
+  {
+    kelompok: 'F. Tutup buku', nama: 'Buka kembali wajib alasan; dengan alasan berhasil & tercatat', sebagai: 'sistem',
+    jalankan: async (q) => {
+      await tuntaskanBulanLalu(q);
+      await q(`select tutup_periode(${BULAN_LALU})`);
+      await jadiPengguna(q, 'owner');
+      await q(`savepoint sebelum_buka`);
+      const tanpaAlasan = await harapDitolak(q, `select buka_periode(${BULAN_LALU}, '')`, 'wajib diisi');
+      await q(`rollback to savepoint sebelum_buka`);
+      await q(`select buka_periode(${BULAN_LALU}, 'Koreksi pembayaran yang terlewat')`);
+      const [t] = await q(`select count(*) n from tutup_buku`);
+      const [r] = await q(`select aksi, alasan from riwayat_tutup_buku order by id desc limit 1`);
+      return { lulus: tanpaAlasan.lulus && Number(t.n) === 0 && r?.aksi === 'buka',
+               info: `tanpa alasan: ${tanpaAlasan.lulus ? 'ditolak' : 'TIDAK ditolak'}; dengan alasan: dibuka, riwayat "${r?.aksi}: ${r?.alasan}"` };
     }
   }
 ];

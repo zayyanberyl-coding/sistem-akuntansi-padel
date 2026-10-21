@@ -32,7 +32,7 @@ oleh trigger database, lalu diringkas menjadi Jurnal Umum, Buku Besar, dan Lapor
 | **Member** | Data pelanggan, jenis paket (khusus owner), penjualan paket, sisa jam, **pengakuan sisa paket kedaluwarsa** |
 | **Jurnal Umum** | Jurnal otomatis per periode + cek keseimbangan + siapa yang mencatat |
 | **Buku Besar** | Mutasi per akun dengan saldo awal dan saldo berjalan |
-| **Laporan Pendapatan** | Pendapatan per akun, rincian per lapangan, **penerimaan & refund per metode (Kas/Bank/QRIS)**, siap cetak |
+| **Laporan Pendapatan** | Pendapatan per akun, rincian per lapangan, **penerimaan & refund per metode (Kas/Bank/QRIS)**, siap cetak, **tutup buku per bulan** (owner) + riwayat |
 
 ### Aturan tarif
 - Jam operasional 07.00–23.00, booking per jam penuh.
@@ -54,6 +54,10 @@ oleh trigger database, lalu diringkas menjadi Jurnal Umum, Buku Besar, dan Lapor
 - Tarif, denda, jenis pembayaran, dan hasil pembatalan dihitung server.
 - Setiap transaksi dan jurnal mencatat **siapa** pembuatnya; setiap perubahan status booking masuk **riwayat**.
 - Jurnal hanya bisa dibaca dari aplikasi; tidak ada izin `DELETE`.
+- **Tutup buku** per bulan (owner saja): bulan yang sudah ditutup tidak bisa lagi menerima transaksi maupun jurnal.
+  Syarat: bulan sudah berakhir dan semua booking di bulan itu selesai/batal. Jurnal otomatis yang terlambat
+  (pengakuan pendapatan, sisa paket kedaluwarsa) dicatat di tanggal 1 bulan berikutnya yang masih terbuka.
+  Membuka kembali hanya oleh owner, wajib alasan, dan tercatat di riwayat.
 
 ## Logika Akuntansi (jurnal otomatis via trigger)
 
@@ -116,6 +120,8 @@ erDiagram
     PERALATAN ||--o{ SEWA_PERALATAN : disewa
     JURNAL ||--|{ JURNAL_DETAIL : berisi
     AKUN ||--o{ JURNAL_DETAIL : dicatat_di
+    PENGGUNA ||--o{ TUTUP_BUKU : menutup
+    PENGGUNA ||--o{ RIWAYAT_TUTUP_BUKU : mencatat
 
     PENGGUNA {
         uuid id PK
@@ -215,6 +221,19 @@ erDiagram
         uuid oleh FK
         timestamptz waktu
     }
+    TUTUP_BUKU {
+        date periode PK
+        uuid ditutup_oleh FK
+        timestamptz ditutup_pada
+    }
+    RIWAYAT_TUTUP_BUKU {
+        bigint id PK
+        date periode
+        text aksi
+        text alasan
+        uuid oleh FK
+        timestamptz waktu
+    }
     AKUN {
         text kode PK
         text nama
@@ -244,7 +263,7 @@ erDiagram
 ```
 sistem-akuntansi-padel/
 ├── backend/
-│   ├── schema.sql         # 13 tabel, relasi, view, keamanan (RLS & peran)
+│   ├── schema.sql         # 15 tabel, relasi, view, keamanan (RLS & peran)
 │   ├── triggers.sql       # tarif, cek bentrok, stok, kebijakan batal, jurnal otomatis
 │   ├── seed.sql           # data contoh (sedikit) + hubungkan akun login ke peran
 │   └── seed_tambahan.sql  # data contoh 1,5 bulan (opsional)
@@ -268,7 +287,7 @@ sistem-akuntansi-padel/
 │       └── laporan.js
 ├── tests/
 │   ├── uji-database.html  # penjalan uji otomatis (buka dengan Live Server)
-│   ├── daftar-uji.js      # 35 uji: integritas jurnal, akses, peran, validasi, akuntansi
+│   ├── daftar-uji.js      # 44 uji: integritas jurnal, akses, peran, validasi, akuntansi, tutup buku
 │   ├── supabase-tiruan.sql# tiruan Auth & hak bawaan Supabase untuk database uji
 │   └── CHECKLIST_UAT.md   # checklist uji klik antarmuka (manual)
 ├── index.html             # pengalih ke frontend/ (untuk GitHub Pages)
@@ -324,7 +343,7 @@ Di **SQL Editor → New query**, jalankan berurutan:
 ### 1. Uji otomatis database (`tests/uji-database.html`)
 Keempat file SQL asli dijalankan di PostgreSQL 18 **di dalam browser** (PGlite), dengan tiruan
 modul Auth & hak bawaan Supabase (`tests/supabase-tiruan.sql`). **Tidak menyentuh Supabase live.**
-Isi uji (`tests/daftar-uji.js`, 35 uji + 5 tahap pemasangan):
+Isi uji (`tests/daftar-uji.js`, 44 uji + 5 tahap pemasangan):
 - **Integritas jurnal** — total debit = kredit, tiap jurnal seimbang, bernomor bukti & bersumber.
 - **Akses tanpa login** — baca pelanggan/jurnal, buat booking, panggil fungsi: semua ditolak.
 - **Peran & otorisasi** — akun tanpa peran tidak melihat data; admin tidak bisa ubah tarif, refund,
@@ -332,15 +351,17 @@ Isi uji (`tests/daftar-uji.js`, 35 uji + 5 tahap pemasangan):
 - **Validasi transaksi** — tanggal lampau/masa depan, batas mundur 3 hari, bentrok jadwal, tarif campuran,
   lebih bayar, stok kurang, jadwal terkunci, status final.
 - **Logika akuntansi** — pengakuan pendapatan, QRIS → 1-103, hangus, selesaikan massal, denda server, breakage.
+- **Tutup buku** — hanya owner, hanya bulan yang sudah berakhir & tuntas, transaksi/jurnal di bulan tertutup ditolak,
+  jurnal otomatis terlambat digeser ke bulan terbuka, buka kembali wajib alasan.
 
 Cara menjalankan: buka folder proyek di VS Code → klik kanan `tests/uji-database.html` →
 **Open with Live Server** (perlu internet untuk memuat PGlite). Hasil tampil dalam ±5 detik.
 Setiap uji dijalankan dalam transaksi yang di-*rollback*, jadi uji tidak saling memengaruhi.
 
-Hasil terakhir: **40/40 lulus** (21 Oktober 2026).
+Hasil terakhir: **49/49 lulus** (21 Oktober 2026).
 
 ### 2. Uji penerimaan pengguna (`tests/CHECKLIST_UAT.md`)
-Daftar 28 langkah uji klik di aplikasi untuk peran owner & admin (login, booking, pembayaran,
+Daftar 31 langkah uji klik di aplikasi untuk peran owner & admin (login, booking, pembayaran, tutup buku,
 pembatalan, dashboard, peralatan, laporan, cetak). Diisi manual oleh penguji.
 
 ## Keterbatasan

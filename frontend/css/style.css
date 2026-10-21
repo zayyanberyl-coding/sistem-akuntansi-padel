@@ -364,6 +364,8 @@ tbody tr:hover td { background: #fbfbfa; }
 .badge-selesai, .badge-dikembalikan          { background: var(--hijau-bg);  color: var(--hijau); }
 .badge-batal, .badge-rusak                   { background: var(--merah-bg);  color: var(--merah); }
 .badge-member                                { background: var(--ungu-bg);   color: var(--ungu); }
+.badge-tutup                                 { background: var(--merah-bg);  color: var(--merah); }
+.badge-buka                                  { background: var(--hijau-bg);  color: var(--hijau); }
 .badge .ti { font-size: 12px; vertical-align: -1px; }
 .stok-rendah { color: var(--merah); font-weight: 600; }
 
@@ -527,7 +529,7 @@ dialog[open]::backdrop { animation: pudar-masuk .22s ease-out; }
 /* ------------------------- CETAK ------------------------- */
 @media print {
   body { background: #fff; display: block; }
-  .sidebar, .topbar, .filter, .toast, .alert, .bantuan { display: none !important; }
+  .sidebar, .topbar, .filter, .toast, .alert, .bantuan, .sembunyi-cetak { display: none !important; }
   .panel { border: 0; padding: 0; }
   .konten { padding: 0; }
 }
