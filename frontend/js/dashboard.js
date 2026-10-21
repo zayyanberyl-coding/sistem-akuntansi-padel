@@ -20,37 +20,47 @@ const FOTO_BOLA = 'https://images.unsplash.com/photo-1657704227277-04e8accd079e?
 const NAMA_HARI = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
 
 // Warna tiap akun pendapatan (sama di baris rincian & donut).
-// Sudah diuji: tetap bisa dibedakan oleh penderita buta warna merah-hijau,
-// dan kontras terhadap latar putih >= 3:1.
+// Sudah diuji: pasangan yang bersebelahan tetap bisa dibedakan oleh penderita
+// buta warna merah-hijau, dan kontras terhadap latar putih >= 3:1.
 const WARNA_AKUN = {
-  '4-101': '#0e7c5a',   // Sewa Lapangan   - hijau
-  '4-102': '#c98314',   // Sewa Peralatan  - emas
-  '4-103': '#3b7bd4',   // Denda           - biru
-  '4-201': '#a7479a'    // Lain-lain       - ungu
+  '4-101': '#0e7c5a',   // Sewa Lapangan            - hijau
+  '4-102': '#c98314',   // Sewa Peralatan           - emas
+  '4-103': '#3b7bd4',   // Denda                    - biru
+  '4-104': '#aa3700',   // Paket Member Kedaluwarsa - terakota
+  '4-201': '#a7479a'    // Lain-lain                - ungu
 };
+
+// Akun kas & setara kas (penerimaan dipisah per metode)
+const AKUN_KAS = { '1-101': 'Kas', '1-102': 'Bank', '1-103': 'QRIS' };
 
 async function muatDashboard() {
   const hari = hariIni();
 
+  // Akui otomatis sisa nilai paket member yang sudah kedaluwarsa (fungsi database)
+  await db.rpc('akui_breakage_paket');
+
   // Ambil semua data sekaligus (paralel) supaya lebih cepat
-  const [resBooking, resJurnal, resAkun, resAlat, resLapangan] = await Promise.all([
+  const [resBooking, resJurnal, resAkun, resAlat, resLapangan, resTindakan] = await Promise.all([
     // ambilSemua: data bisa lebih dari 1.000 baris (lihat app.js)
     ambilSemua(() => db.from('v_booking_lengkap')
       .select('id, tanggal, jam_mulai, jam_selesai, durasi_jam, nama_pelanggan, nama_lapangan, status, pembelian_paket_id')
       .gte('tanggal', tambahHari(hari, -30)).lte('tanggal', tambahHari(hari, 14))
       .neq('status', 'batal').order('tanggal').order('jam_mulai').order('id')),
-    ambilSemua(() => db.from('v_jurnal_lengkap')
-      .select('id, akun_kode, kategori, tanggal, debit, kredit').order('id')),
+    // Ringkasan mutasi per akun per hari dihitung di server (bukan ribuan baris jurnal)
+    ambilSemua(() => db.from('v_mutasi_harian')
+      .select('tanggal, akun_kode, kategori, debit, kredit').order('tanggal').order('akun_kode')),
     db.from('akun').select('*').eq('kategori', 'Pendapatan').order('kode'),
     db.from('peralatan').select('*').order('jenis', { ascending: false }).order('nama'),
-    db.from('lapangan').select('id').eq('aktif', true)
+    db.from('lapangan').select('id').eq('aktif', true),
+    db.from('v_booking_perlu_tindakan').select('*').order('tanggal').order('jam_mulai')
   ]);
   if (adaError(resBooking.error) || adaError(resJurnal.error) || adaError(resAkun.error) ||
-      adaError(resAlat.error) || adaError(resLapangan.error)) return;
+      adaError(resAlat.error) || adaError(resLapangan.error) || adaError(resTindakan.error)) return;
 
   const booking = resBooking.data;
-  const jurnal = resJurnal.data;
+  const jurnal = resJurnal.data;   // baris ringkasan: tanggal, akun, kategori, debit, kredit
 
+  tampilkanTindakan(resTindakan.data);
   tampilkanHero(resAlat.data, resLapangan.data.length);
   tampilkanKeuangan(jurnal, resAkun.data, hari);
   tampilkanTrenHarian(jurnal, hari);
@@ -60,6 +70,41 @@ async function muatDashboard() {
 
   // Data sudah tampil: hapus efek skeleton (kotak berkilau)
   document.querySelectorAll('#page-dashboard .skeleton').forEach(el => el.classList.remove('skeleton'));
+}
+
+// ---------- 0. Peringatan booking lewat waktu ----------
+//   perlu_diselesaikan : lunas & jam main sudah lewat -> pendapatan belum diakui
+//   belum_lunas        : menunggu/dp & jam main sudah lewat -> perlu ditagih/dibatalkan
+function tampilkanTindakan(daftar) {
+  const el = $('dash-tindakan');
+  const selesai = daftar.filter(b => b.tindakan === 'perlu_diselesaikan');
+  const belumLunas = daftar.filter(b => b.tindakan === 'belum_lunas');
+  el.hidden = daftar.length === 0;
+  if (!daftar.length) return;
+
+  const nilai = selesai.reduce((t, b) => t + Number(b.total_harga), 0);
+  el.innerHTML = `
+    <i class="ti ti-alert-triangle"></i>
+    <div>
+      ${selesai.length ? `<b>${selesai.length} booking sudah dimainkan tetapi belum ditandai selesai</b>
+        — pendapatan ${rupiah(nilai)} belum diakui.<br>` : ''}
+      ${belumLunas.length ? `<span>${belumLunas.length} booking lewat jadwal belum lunas (perlu ditagih atau dibatalkan):
+        ${belumLunas.slice(0, 3).map(b => esc(b.kode_booking)).join(', ')}${belumLunas.length > 3 ? ', …' : ''}</span>` : ''}
+    </div>
+    ${selesai.length ? `<button class="tombol tombol-utama" id="dash-selesaikan" type="button">
+      <i class="ti ti-checks"></i> Selesaikan ${selesai.length} booking</button>` : ''}`;
+
+  const tombol = $('dash-selesaikan');
+  if (tombol) tombol.addEventListener('click', async () => {
+    if (!confirm(`Tandai ${selesai.length} booking lunas yang sudah lewat jadwal sebagai SELESAI?\n\n` +
+      `Pendapatan ${rupiah(nilai)} akan diakui (Pendapatan Diterima di Muka → Pendapatan Sewa Lapangan).`)) return;
+    tombol.classList.add('memuat');
+    tombol.disabled = true;
+    const { data, error } = await db.rpc('selesaikan_booking_lewat_waktu');
+    if (adaError(error)) { tombol.classList.remove('memuat'); tombol.disabled = false; return; }
+    tampilkanPesan(`${data} booking diselesaikan, pendapatan diakui.`);
+    muatDashboard();
+  });
 }
 
 // ---------- 1. Kartu hero ----------
@@ -96,7 +141,10 @@ function tampilkanKeuangan(jurnal, akunPendapatan, hari) {
   animasiAngka($('dash-pendapatan-bulan'), totalBulanIni, rupiah);
   $('dash-tren-pendapatan').outerHTML = teksTren(totalBulanIni, totalBulanLalu, 'bulan lalu', 'dash-tren-pendapatan');
 
-  animasiAngka($('dash-kas'),  hitungSaldo(jurnal.filter(j => j.akun_kode === '1-101'), 'D'), rupiah);
+  // Kas & setara kas = Kas + Bank + QRIS; rinciannya tampil saat kursor diarahkan
+  const saldoKas = Object.keys(AKUN_KAS).map(k => ({ nama: AKUN_KAS[k], nilai: hitungSaldo(jurnal.filter(j => j.akun_kode === k), 'D') }));
+  animasiAngka($('dash-kas'), saldoKas.reduce((t, a) => t + a.nilai, 0), rupiah);
+  $('dash-kas').title = saldoKas.map(a => `${a.nama}: ${rupiah(a.nilai)}`).join('\n');
   animasiAngka($('dash-pddm'), hitungSaldo(jurnal.filter(j => j.akun_kode === '2-101'), 'K'), rupiah);
 
   // Rincian per akun + persentase dari total pendapatan bulan ini

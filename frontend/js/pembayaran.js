@@ -1,8 +1,10 @@
 /* ==================================================================
    PEMBAYARAN
    Menerima DP / pelunasan untuk booking reguler.
-   Jurnal otomatis (trigger): Kas (D) / Pendapatan Diterima di Muka (K)
+   Jurnal otomatis (trigger): Kas/Bank/QRIS sesuai metode (D) /
+   Pendapatan Diterima di Muka (K).
    Status booking otomatis berubah jadi 'dp' atau 'lunas'.
+   Tanggal tidak boleh di masa depan; mundur > 3 hari hanya owner (dijaga database).
    ================================================================== */
 
 let byDaftarBooking = [];                 // booking yang belum lunas
@@ -10,7 +12,15 @@ let pembayaranBookingTerpilih = null;     // diisi dari tombol "Bayar" di halama
 
 function siapkanPembayaran() {
   $('by-tanggal').value = hariIni();
+  $('by-tanggal').max = hariIni();                                       // tidak boleh masa depan
+  if (!adalahOwner()) $('by-tanggal').min = tambahHari(hariIni(), -3);   // admin maks. mundur 3 hari
   $('by-booking').addEventListener('change', tampilkanInfoTagihan);
+
+  // Tombol kwitansi di riwayat pembayaran
+  $('by-daftar').addEventListener('click', (e) => {
+    const tombol = e.target.closest('button[data-kwitansi]');
+    if (tombol) cetakKwitansi(Number(tombol.dataset.kwitansi));   // cetak.js
+  });
 
   // Tombol cepat: isi 50% (DP) atau seluruh sisa (pelunasan)
   $('by-isi-dp').addEventListener('click', () => {
@@ -100,12 +110,12 @@ async function simpanPembayaran(e) {
 }
 
 async function muatRiwayatPembayaran() {
-  skeletonTabel('by-daftar', 6);
+  skeletonTabel('by-daftar', 8);
   const { data, error } = await db.from('v_pembayaran_lengkap').select('*')
     .order('tanggal', { ascending: false }).order('id', { ascending: false }).limit(100);
   if (adaError(error)) return;
 
-  $('by-daftar').innerHTML = data.length === 0 ? barisKosong(6) : data.map(p => `
+  $('by-daftar').innerHTML = data.length === 0 ? barisKosong(8) : data.map(p => `
     <tr data-id="${p.id}">
       <td>${tanggalIndo(p.tanggal)}</td>
       <td>${esc(p.kode_booking)}</td>
@@ -113,5 +123,8 @@ async function muatRiwayatPembayaran() {
       <td>${badge(p.jenis)}</td>
       <td>${esc(p.metode_bayar)}</td>
       <td class="angka">${rupiah(p.jumlah)}</td>
+      <td><small class="abu">${esc(p.nama_pembuat || 'data contoh')}</small></td>
+      <td><button class="tombol tombol-kecil" data-kwitansi="${p.id}" title="Cetak kwitansi">
+            <i class="ti ti-receipt"></i> Kwitansi</button></td>
     </tr>`).join('');
 }

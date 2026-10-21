@@ -178,6 +178,7 @@ const HALAMAN = {
 const halamanSudahDisiapkan = new Set();
 
 function bukaHalaman(nama) {
+  if (!penggunaAktif) return;              // belum login (lihat auth.js)
   if (!HALAMAN[nama]) nama = 'dashboard';
   const halaman = HALAMAN[nama];
 
@@ -222,6 +223,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Saat hash URL berubah (menu diklik / tombol back browser)
   window.addEventListener('hashchange', () => bukaHalaman(location.hash.slice(1)));
 
-  // Buka halaman sesuai hash sekarang (default: dashboard)
-  bukaHalaman(location.hash.slice(1) || 'dashboard');
+  // Cek login dulu; setelah berhasil, auth.js membuka halaman sesuai hash
+  if (supabaseSudahDiatur) mulaiAplikasi();
+  else document.body.classList.remove('belum-login');   // tampilkan pesan konfigurasi
 });

@@ -54,7 +54,9 @@ async function muatJurnal() {
           <td class="angka">${d.kredit > 0 ? rupiah(d.kredit) : ''}</td>
         </tr>`;
     });
-    html += `<tr><td></td><td></td><td colspan="4"><small class="abu"><i>(${esc(kepala.keterangan)})</i></small></td></tr>`;
+    // Keterangan + siapa yang memicu transaksi (jejak audit)
+    html += `<tr><td></td><td></td><td colspan="4"><small class="abu"><i>(${esc(kepala.keterangan)})</i>
+      · dicatat oleh ${esc(kepala.nama_pembuat || 'data contoh')}</small></td></tr>`;
   }
 
   $('ju-isi').innerHTML = html;

@@ -17,6 +17,8 @@ let pelangganBaruUntukBooking = null;
 
 function siapkanMember() {
   $('bp-tanggal').value = hariIni();
+  $('bp-tanggal').max = hariIni();                                       // tidak boleh masa depan
+  if (!adalahOwner()) $('bp-tanggal').min = tambahHari(hariIni(), -3);   // admin maks. mundur 3 hari
   $('form-pelanggan').addEventListener('submit', simpanPelanggan);
   $('form-paket').addEventListener('submit', simpanPaket);
   $('form-beli-paket').addEventListener('submit', simpanPembelianPaket);
@@ -81,7 +83,7 @@ async function muatMember() {
       <td class="angka">${rupiah(p.harga)}</td>
       <td class="angka">${rupiah(p.harga / p.jumlah_jam)}</td>
       <td>${p.masa_berlaku_hari} hari</td>
-      <td><button class="tombol tombol-kecil" data-paket="${p.id}">${p.aktif ? 'Nonaktifkan' : 'Aktifkan'}</button></td>
+      <td><button class="tombol tombol-kecil khusus-owner" data-paket="${p.id}">${p.aktif ? 'Nonaktifkan' : 'Aktifkan'}</button></td>
     </tr>`).join('');
   isiSelect($('bp-paket'), pkDaftar.filter(p => p.aktif), p => p.id,
     p => `${p.nama_paket} – ${rupiah(p.harga)} (${p.jumlah_jam} jam, ${p.masa_berlaku_hari} hari)`, '-- pilih paket --');
@@ -90,7 +92,8 @@ async function muatMember() {
   const beli = resBeli.data;
   $('bp-daftar').innerHTML = beli.length === 0 ? barisKosong(8) : beli.map(b => {
     let status = '<span class="badge badge-selesai">aktif</span>';
-    if (b.kadaluarsa) status = '<span class="badge badge-batal">kadaluarsa</span>';
+    if (b.kadaluarsa) status = '<span class="badge badge-batal">kadaluarsa</span>'
+      + (b.nilai_breakage > 0 ? `<br><small class="abu">sisa ${rupiah(b.nilai_breakage)} diakui pendapatan</small>` : '');
     else if (b.sisa_jam === 0) status = '<span class="badge badge-lunas">habis</span>';
     return `
       <tr data-id="${b.id}">

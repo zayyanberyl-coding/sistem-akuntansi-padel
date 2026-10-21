@@ -2,9 +2,11 @@
    PERALATAN
    - Kelola data raket & bola (tambah / edit / stok)
    - Sewa peralatan untuk sebuah booking
-       Jurnal: Kas (D) / Pendapatan Sewa Peralatan (K), stok berkurang
+       Jurnal: Kas/Bank/QRIS (D) / Pendapatan Sewa Peralatan (K), stok berkurang
    - Pengembalian: stok bertambah; jika rusak ada denda
-       Jurnal: Kas (D) / Pendapatan Denda (K)
+       Jurnal: Kas/Bank/QRIS (D) / Pendapatan Denda (K)
+       Denda SELALU dihitung database (unit rusak x denda per unit).
+   - Tambah/edit peralatan & stok: khusus owner (dijaga RLS)
    ================================================================== */
 
 let prDaftar = [];        // data peralatan
@@ -34,10 +36,11 @@ function siapkanPeralatan() {
     $('kb-info').innerHTML = `${s.jumlah} × ${esc(s.nama_peralatan)} – ${esc(s.kode_booking)} (${esc(s.nama_pelanggan)})`;
     $('kb-rusak').value = 0;
     $('kb-rusak').max = s.jumlah;
-    $('kb-denda').value = 0;
+    tampilkanPratinjauDenda();
     $('dialog-kembali').returnValue = '';   // kosongkan hasil dialog sebelumnya
     $('dialog-kembali').showModal();
   });
+  $('kb-rusak').addEventListener('input', tampilkanPratinjauDenda);
 
   // Saat dialog ditutup: proses jika tombol "Proses" yang ditekan
   $('dialog-kembali').addEventListener('close', () => {
@@ -70,7 +73,7 @@ async function muatPeralatan() {
       <td class="angka">${rupiah(p.tarif_sewa)}</td>
       <td class="angka">${rupiah(p.denda_rusak)}</td>
       <td class="angka ${p.stok < 5 ? 'stok-rendah' : ''}">${p.stok}</td>
-      <td><button class="tombol tombol-kecil" data-edit="${p.id}">Edit</button></td>
+      <td><button class="tombol tombol-kecil khusus-owner" data-edit="${p.id}">Edit</button></td>
     </tr>`).join('');
 
   tampilkanInfoSewa();
@@ -99,6 +102,7 @@ async function simpanSewa(e) {
     booking_id: Number($('sw-booking').value),
     peralatan_id: Number($('sw-peralatan').value),
     jumlah: Number($('sw-jumlah').value),
+    metode_bayar: $('sw-metode').value,
     tanggal_sewa: hariIni()
     // tarif & subtotal diisi trigger, stok dikurangi trigger
   }).select().single();
@@ -140,11 +144,10 @@ async function prosesPengembalian() {
     return tampilkanPesan(`Jumlah rusak harus 0 s.d. ${s.jumlah}.`, 'error');
   }
 
+  // Denda & tanggal kembali diisi database (tidak bisa diubah dari aplikasi)
   const { data, error } = await db.from('sewa_peralatan').update({
     status_kembali: rusak > 0 ? 'rusak' : 'dikembalikan',
-    jumlah_rusak: rusak,
-    denda: Number($('kb-denda').value) || 0,   // 0 = dihitung otomatis oleh trigger
-    tanggal_kembali: hariIni()
+    jumlah_rusak: rusak
   }).eq('id', s.id).select().single();
   if (adaError(error)) return;
 
@@ -154,6 +157,22 @@ async function prosesPengembalian() {
   await muatPeralatan();
   sorotBaris(`#sw-daftar tr[data-id="${s.id}"]`);
   sorotBaris(`#pr-daftar tr[data-id="${s.peralatan_id}"]`);   // stoknya berubah
+}
+
+// Pratinjau denda di dialog pengembalian (nilai final dihitung database)
+function tampilkanPratinjauDenda() {
+  const s = swSedangDiproses;
+  const alat = prDaftar.find(p => p.id === s.peralatan_id);
+  const rusak = Number($('kb-rusak').value) || 0;
+  const el = $('kb-denda-info');
+  if (rusak <= 0) {
+    el.className = 'pratinjau ok';
+    el.textContent = 'Semua unit kembali dalam kondisi baik. Tidak ada denda.';
+  } else {
+    el.className = 'pratinjau error';
+    el.innerHTML = `${rusak} unit rusak × ${rupiah(alat?.denda_rusak)} = <b>denda ${rupiah(rusak * (alat?.denda_rusak || 0))}</b>
+      (dibayar ${esc(s.metode_bayar)})`;
+  }
 }
 
 // ---- Tambah / edit data peralatan ----

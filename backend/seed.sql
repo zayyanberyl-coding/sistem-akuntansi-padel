@@ -1,9 +1,16 @@
 -- =====================================================================
---  DATA CONTOH (SEED)
+--  DATA CONTOH (SEED) - versi 2
 --  Sistem Akuntansi Pendapatan Sewa Lapangan Padel - Smash Padel Club
 -- ---------------------------------------------------------------------
---  Jalankan TERAKHIR, setelah schema.sql dan triggers.sql,
---  pada tabel yang masih KOSONG (baru dibuat).
+--  Jalankan setelah schema.sql dan triggers.sql, pada tabel yang masih
+--  KOSONG (baru dibuat).
+--
+--  SEBELUM menjalankan file ini, buat 2 akun login di
+--  Supabase > Authentication > Users > Add user (centang Auto Confirm):
+--    owner@smashpadel.test   -> peran owner
+--    admin@smashpadel.test   -> peran admin
+--  Bagian 0 di bawah menghubungkan akun tersebut ke perannya.
+--  (Boleh memakai email lain: ganti email di bagian 0.)
 --
 --  Tanggal transaksi memakai current_date (hari ini) +/- beberapa hari,
 --  jadi dashboard selalu punya data "bulan ini" kapan pun file dijalankan.
@@ -15,15 +22,32 @@
 
 
 -- ---------------------------------------------------------------------
+-- 0. PERAN PENGGUNA (hubungkan akun login ke peran)
+--    Jika akun belum dibuat, baris ini tidak memasukkan apa-apa;
+--    jalankan ulang bagian ini setelah akun dibuat.
+-- ---------------------------------------------------------------------
+insert into pengguna (id, nama, peran)
+select id, 'Owner Demo', 'owner' from auth.users where email = 'owner@smashpadel.test'
+on conflict (id) do update set peran = excluded.peran, nama = excluded.nama;
+
+insert into pengguna (id, nama, peran)
+select id, 'Admin Demo', 'admin' from auth.users where email = 'admin@smashpadel.test'
+on conflict (id) do update set peran = excluded.peran, nama = excluded.nama;
+
+
+-- ---------------------------------------------------------------------
 -- 1. BAGAN AKUN (Chart of Accounts)
 -- ---------------------------------------------------------------------
 insert into akun (kode, nama, kategori, saldo_normal) values
-  ('1-101', 'Kas',                          'Aset',       'D'),
-  ('2-101', 'Pendapatan Diterima di Muka',  'Kewajiban',  'K'),
-  ('4-101', 'Pendapatan Sewa Lapangan',     'Pendapatan', 'K'),
-  ('4-102', 'Pendapatan Sewa Peralatan',    'Pendapatan', 'K'),
-  ('4-103', 'Pendapatan Denda',             'Pendapatan', 'K'),
-  ('4-201', 'Pendapatan Lain-lain',         'Pendapatan', 'K');
+  ('1-101', 'Kas',                                  'Aset',       'D'),
+  ('1-102', 'Bank',                                 'Aset',       'D'),
+  ('1-103', 'Saldo QRIS',                           'Aset',       'D'),
+  ('2-101', 'Pendapatan Diterima di Muka',          'Kewajiban',  'K'),
+  ('4-101', 'Pendapatan Sewa Lapangan',             'Pendapatan', 'K'),
+  ('4-102', 'Pendapatan Sewa Peralatan',            'Pendapatan', 'K'),
+  ('4-103', 'Pendapatan Denda',                     'Pendapatan', 'K'),
+  ('4-104', 'Pendapatan Paket Member Kedaluwarsa',  'Pendapatan', 'K'),
+  ('4-201', 'Pendapatan Lain-lain',                 'Pendapatan', 'K');
 
 
 -- ---------------------------------------------------------------------
@@ -71,9 +95,10 @@ insert into booking (id, pelanggan_id, lapangan_id, tanggal, jam_mulai, jam_sele
   (5, 5, 1, current_date,     '17:00', '19:00', null),  -- hari ini, baru DP
   (6, 6, 2, current_date + 1, '09:00', '11:00', null),  -- besok, belum bayar
   (7, 1, 3, current_date + 2, '10:00', '12:00', null),  -- lusa, sudah lunas
-  (8, 4, 2, current_date + 3, '07:00', '08:00', 1);     -- pakai paket member (belum main)
+  (8, 4, 2, current_date + 3, '07:00', '08:00', 1),     -- pakai paket member (belum main)
+  (9, 2, 3, current_date + 4, '19:00', '21:00', null);  -- DP lalu dibatalkan KLUB -> refund
 
--- Pembayaran -> jurnal: Kas (D) / Pendapatan Diterima di Muka (K)
+-- Pembayaran -> jurnal: Kas/Bank/QRIS sesuai metode (D) / Pendapatan Diterima di Muka (K)
 -- Booking 1: DP Rp 100.000, lalu pelunasan sisanya
 insert into pembayaran (booking_id, tanggal, jumlah, metode_bayar) values
   (1, current_date - 7, 100000, 'transfer');
@@ -96,24 +121,34 @@ insert into pembayaran (booking_id, tanggal, jumlah, metode_bayar) values
 insert into pembayaran (booking_id, tanggal, jumlah, metode_bayar)
   select id, current_date, total_harga, 'transfer' from booking where id = 7;
 
--- Sewa peralatan -> stok berkurang + jurnal Kas (D) / Pendapatan Sewa Peralatan (K)
-insert into sewa_peralatan (id, booking_id, peralatan_id, jumlah, tanggal_sewa) values
-  (1, 1, 1, 2, current_date - 6),   -- 2 raket standar
-  (2, 2, 1, 4, current_date - 5),   -- 4 raket standar
-  (3, 2, 3, 1, current_date - 5),   -- 1 tabung bola
-  (4, 5, 2, 2, current_date);       -- 2 raket pro (masih dipinjam)
+-- Booking 9: DP Rp 200.000 via transfer
+insert into pembayaran (booking_id, tanggal, jumlah, metode_bayar) values
+  (9, current_date - 1, 200000, 'transfer');
+
+-- Sewa peralatan -> stok berkurang + jurnal Kas/QRIS (D) / Pendapatan Sewa Peralatan (K)
+insert into sewa_peralatan (id, booking_id, peralatan_id, jumlah, tanggal_sewa, metode_bayar) values
+  (1, 1, 1, 2, current_date - 6, 'tunai'),   -- 2 raket standar
+  (2, 2, 1, 4, current_date - 5, 'qris'),    -- 4 raket standar
+  (3, 2, 3, 1, current_date - 5, 'qris'),    -- 1 tabung bola
+  (4, 5, 2, 2, current_date,     'tunai');   -- 2 raket pro (masih dipinjam)
 
 -- Pengembalian peralatan -> stok bertambah lagi
 update sewa_peralatan set status_kembali = 'dikembalikan', tanggal_kembali = current_date - 6 where id = 1;
 update sewa_peralatan set status_kembali = 'dikembalikan', tanggal_kembali = current_date - 5 where id = 3;
--- 1 raket rusak -> denda otomatis Rp 350.000, jurnal Kas (D) / Pendapatan Denda (K)
+-- 1 raket rusak -> denda otomatis Rp 350.000, jurnal QRIS (D) / Pendapatan Denda (K)
 update sewa_peralatan set status_kembali = 'rusak', jumlah_rusak = 1, tanggal_kembali = current_date - 5 where id = 2;
 
 -- Booking selesai dimainkan -> jurnal Pendapatan Diterima di Muka (D) / Pendapatan Sewa Lapangan (K)
 update booking set status = 'selesai' where id in (1, 2, 4);
 
--- Booking batal -> DP hangus: Pendapatan Diterima di Muka (D) / Pendapatan Lain-lain (K)
-update booking set status = 'batal', catatan = 'Pelanggan berhalangan' where id = 3;
+-- Batal oleh pelanggan < 24 jam sebelum main -> DP hangus:
+--   Pendapatan Diterima di Muka (D) / Pendapatan Lain-lain (K)
+update booking set status = 'batal', alasan_batal = 'Pelanggan berhalangan' where id = 3;
+
+-- Batal oleh KLUB -> refund ke rekening pelanggan:
+--   Pendapatan Diterima di Muka (D) / Bank (K)
+update booking set status = 'batal', dibatalkan_oleh_klub = true,
+       alasan_batal = 'Perawatan lapangan', metode_refund = 'transfer' where id = 9;
 
 
 -- ---------------------------------------------------------------------

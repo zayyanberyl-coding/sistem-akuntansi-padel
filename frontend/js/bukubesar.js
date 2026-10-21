@@ -28,28 +28,31 @@ async function muatBukuBesar() {
   const sampai = $('bb-sampai').value;
   const kodeDipilih = $('bb-akun').value;
 
-  // Ambil semua transaksi s.d. tanggal "sampai" (yang sebelum "dari" dipakai untuk saldo awal)
   skeletonBlok('bb-isi', 260);     // kotak berkilau saat pertama kali dimuat (animasi.js)
   // ambilSemua: bisa lebih dari 1.000 baris (lihat app.js)
-  const { data, error } = await ambilSemua(() => {
-    let query = db.from('v_jurnal_lengkap').select('*')
-      .lte('tanggal', sampai).order('tanggal').order('jurnal_id').order('id');
-    if (kodeDipilih) query = query.eq('akun_kode', kodeDipilih);
-    return query;
-  });
-  if (adaError(error)) return;
+  const filterAkun = (query) => kodeDipilih ? query.eq('akun_kode', kodeDipilih) : query;
+  const [resAwal, resPeriode] = await Promise.all([
+    // Saldo awal: ringkasan per hari SEBELUM tanggal "dari" (dijumlah di server)
+    ambilSemua(() => filterAkun(db.from('v_mutasi_harian').select('tanggal, akun_kode, debit, kredit')
+      .lt('tanggal', dari).order('tanggal').order('akun_kode'))),
+    // Rincian transaksi hanya dalam periode yang dipilih
+    ambilSemua(() => filterAkun(db.from('v_jurnal_lengkap').select('*')
+      .gte('tanggal', dari).lte('tanggal', sampai).order('tanggal').order('jurnal_id').order('id')))
+  ]);
+  if (adaError(resAwal.error) || adaError(resPeriode.error)) return;
 
   const akunDitampilkan = kodeDipilih ? bbAkun.filter(a => a.kode === kodeDipilih) : bbAkun;
   $('bb-isi').innerHTML = akunDitampilkan
-    .map(akun => tabelBukuBesar(akun, data.filter(d => d.akun_kode === akun.kode), dari))
+    .map(akun => tabelBukuBesar(akun,
+      resAwal.data.filter(d => d.akun_kode === akun.kode),
+      resPeriode.data.filter(d => d.akun_kode === akun.kode), dari))
     .join('');
 }
 
 // Membuat tabel buku besar untuk satu akun
-function tabelBukuBesar(akun, baris, dari) {
-  const sebelum = baris.filter(b => b.tanggal < dari);
-  const periode = baris.filter(b => b.tanggal >= dari);
-
+//   sebelum : mutasi sebelum periode (untuk saldo awal)
+//   periode : baris jurnal di dalam periode
+function tabelBukuBesar(akun, sebelum, periode, dari) {
   let saldo = hitungSaldo(sebelum, akun.saldo_normal);
   let totalDebit = 0;
   let totalKredit = 0;

@@ -1,5 +1,5 @@
 -- =====================================================================
---  FUNGSI & TRIGGER (JURNAL OTOMATIS)
+--  FUNGSI & TRIGGER (JURNAL OTOMATIS) - versi 2
 --  Sistem Akuntansi Pendapatan Sewa Lapangan Padel - Smash Padel Club
 -- ---------------------------------------------------------------------
 --  Jalankan SETELAH schema.sql.
@@ -9,16 +9,23 @@
 --  akuntansi selalu tercatat walaupun frontend lupa membuatnya.
 --
 --  Kode akun yang dipakai (lihat seed.sql):
---    1-101  Kas
---    2-101  Pendapatan Diterima di Muka   (kewajiban / utang jasa)
+--    1-101  Kas                          (penerimaan tunai)
+--    1-102  Bank                         (penerimaan transfer)
+--    1-103  Saldo QRIS                   (penerimaan QRIS, menunggu settlement)
+--    2-101  Pendapatan Diterima di Muka  (kewajiban / utang jasa)
 --    4-101  Pendapatan Sewa Lapangan
 --    4-102  Pendapatan Sewa Peralatan
 --    4-103  Pendapatan Denda
---    4-201  Pendapatan Lain-lain
+--    4-104  Pendapatan Paket Member Kedaluwarsa
+--    4-201  Pendapatan Lain-lain         (DP hangus)
 --
---  "security definer" = fungsi berjalan dengan hak pemilik (admin),
---  sehingga trigger boleh menulis ke tabel jurnal walaupun pengguna anon
+--  "security definer" = fungsi berjalan dengan hak pemilik (admin database),
+--  sehingga trigger boleh menulis ke tabel jurnal walaupun pengguna aplikasi
 --  hanya punya izin membaca jurnal.
+--
+--  auth.uid() = id pengguna yang sedang login. Bernilai NULL bila perintah
+--  dijalankan dari SQL Editor (misal seed.sql) -> validasi khusus pengguna
+--  aplikasi dilewati supaya data contoh bisa dibuat dengan tanggal lampau.
 -- =====================================================================
 
 
@@ -30,6 +37,43 @@
 create or replace function rp(p_nilai numeric) returns text
 language sql immutable as $$
   select 'Rp ' || replace(to_char(coalesce(p_nilai, 0), 'FM999,999,999,990'), ',', '.');
+$$;
+
+-- Tanggal & waktu sekarang menurut WIB (server Supabase memakai UTC)
+create or replace function hari_ini_wib() returns date
+language sql stable as $$
+  select (now() at time zone 'Asia/Jakarta')::date;
+$$;
+
+create or replace function waktu_wib() returns timestamp
+language sql stable as $$
+  select now() at time zone 'Asia/Jakarta';
+$$;
+
+-- Akun kas sesuai metode pembayaran (dipisah agar bisa direkonsiliasi)
+create or replace function akun_kas(p_metode text) returns text
+language sql immutable as $$
+  select case p_metode when 'transfer' then '1-102'
+                       when 'qris'     then '1-103'
+                       else '1-101' end;
+$$;
+
+-- Validasi tanggal transaksi yang diisi pengguna aplikasi:
+--   - tidak boleh di masa depan
+--   - mundur lebih dari 3 hari hanya boleh oleh owner
+create or replace function cek_tanggal_transaksi(p_tanggal date, p_label text) returns void
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if auth.uid() is null then
+    return;   -- dijalankan dari SQL Editor (data contoh)
+  end if;
+  if p_tanggal > hari_ini_wib() then
+    raise exception 'Tanggal % tidak boleh di masa depan', p_label;
+  end if;
+  if p_tanggal < hari_ini_wib() - 3 and coalesce(peran_saya(), '') <> 'owner' then
+    raise exception 'Tanggal % lebih dari 3 hari ke belakang hanya boleh dicatat oleh owner', p_label;
+  end if;
+end;
 $$;
 
 
@@ -54,8 +98,8 @@ begin
     return null;
   end if;
 
-  insert into jurnal (tanggal, keterangan, sumber, sumber_id)
-  values (p_tanggal, p_keterangan, p_sumber, p_sumber_id)
+  insert into jurnal (tanggal, keterangan, sumber, sumber_id, dibuat_oleh)
+  values (p_tanggal, p_keterangan, p_sumber, p_sumber_id, auth.uid())
   returning id into v_id;
 
   -- Nomor bukti otomatis, contoh: JU-00012
@@ -69,10 +113,11 @@ begin
 end;
 $$;
 
--- buat_jurnal TIDAK boleh dipanggil langsung dari aplikasi (anon),
--- supaya orang tidak bisa membuat jurnal palsu. Hanya trigger yang memakainya.
+-- buat_jurnal & cek_tanggal_transaksi TIDAK boleh dipanggil langsung dari
+-- aplikasi, supaya orang tidak bisa membuat jurnal palsu.
 revoke execute on function buat_jurnal(date, text, text, bigint, text, text, numeric)
   from public, anon, authenticated;
+revoke execute on function cek_tanggal_transaksi(date, text) from public, anon, authenticated;
 
 
 -- ---------------------------------------------------------------------
@@ -145,8 +190,9 @@ begin
 end;
 $$;
 
--- Frontend (anon) boleh memanggil fungsi ini lewat supabase.rpc('hitung_tarif', ...)
-grant execute on function hitung_tarif(bigint, date, time, time) to anon, authenticated;
+-- Hanya pengguna yang login yang boleh memanggil fungsi ini
+revoke execute on function hitung_tarif(bigint, date, time, time) from public, anon;
+grant  execute on function hitung_tarif(bigint, date, time, time) to authenticated;
 
 
 -- ---------------------------------------------------------------------
@@ -161,6 +207,11 @@ declare
   v_paket   record;
   v_bentrok record;
 begin
+  -- Pengguna aplikasi tidak boleh membuat booking untuk tanggal yang sudah lewat
+  if auth.uid() is not null and new.tanggal < hari_ini_wib() then
+    raise exception 'Tidak bisa membuat booking untuk tanggal yang sudah lewat';
+  end if;
+
   -- a) Hitung tarif (sekaligus validasi jam)
   select * into v_tarif
   from hitung_tarif(new.lapangan_id, new.tanggal, new.jam_mulai, new.jam_selesai);
@@ -216,6 +267,14 @@ begin
     new.status      := 'lunas';             -- sudah dibayar di muka lewat paket
   end if;
 
+  -- Kolom pembatalan & audit diisi server, bukan dari aplikasi
+  new.dibatalkan_oleh_klub := false;
+  new.alasan_batal  := null;
+  new.hasil_batal   := null;
+  new.metode_refund := null;
+  new.dibuat_oleh   := coalesce(auth.uid(), new.dibuat_oleh);
+  new.diubah_oleh   := null;
+
   -- Kode booking otomatis, contoh: BK-260926-0007
   new.kode_booking := 'BK-' || to_char(new.tanggal, 'YYMMDD') || '-' || lpad(new.id::text, 4, '0');
   new.created_at   := now();
@@ -231,6 +290,7 @@ for each row execute function trg_booking_sebelum_insert();
 -- ---------------------------------------------------------------------
 -- 3. BOOKING - SESUDAH INSERT
 --    Kalau pakai paket member, jam paket langsung dipotong (dicadangkan).
+--    Riwayat status dicatat.
 -- ---------------------------------------------------------------------
 create or replace function trg_booking_sesudah_insert() returns trigger
 language plpgsql security definer set search_path = public as $$
@@ -240,6 +300,9 @@ begin
        set jam_terpakai = jam_terpakai + new.durasi_jam
      where id = new.pembelian_paket_id;
   end if;
+
+  insert into riwayat_status_booking (booking_id, status_lama, status_baru, keterangan, oleh)
+  values (new.id, null, new.status, 'Booking dibuat', auth.uid());
   return new;
 end;
 $$;
@@ -250,13 +313,20 @@ for each row execute function trg_booking_sesudah_insert();
 
 
 -- ---------------------------------------------------------------------
--- 4. BOOKING - SEBELUM UPDATE (penjaga alur status)
+-- 4. BOOKING - SEBELUM UPDATE (penjaga alur status & kebijakan batal)
 --    Alur yang diizinkan:
 --      menunggu -> dp / lunas / batal
 --      dp       -> lunas / batal
 --      lunas    -> selesai / batal
 --      selesai & batal = FINAL, tidak bisa diubah lagi
 --    Jadwal & harga dikunci. Kalau mau ganti jadwal: batalkan, buat baru.
+--
+--    KEBIJAKAN PEMBATALAN (hasil_batal ditentukan server):
+--      - Booking paket member / belum ada pembayaran -> 'tanpa_dana'
+--      - Dibatalkan oleh KLUB, atau oleh pelanggan >= 24 jam sebelum
+--        jam main                                      -> 'refund'
+--      - Dibatalkan oleh pelanggan < 24 jam sebelum main -> 'hangus'
+--    Refund (uang keluar) HANYA boleh dilakukan oleh owner.
 -- ---------------------------------------------------------------------
 create or replace function trg_booking_sebelum_update() returns trigger
 language plpgsql security definer set search_path = public as $$
@@ -283,9 +353,16 @@ begin
   new.durasi_jam   := old.durasi_jam;
   new.jenis_tarif  := old.jenis_tarif;
   new.created_at   := old.created_at;
+  new.dibuat_oleh  := old.dibuat_oleh;
+  new.hasil_batal  := old.hasil_batal;
+  new.diubah_oleh  := coalesce(auth.uid(), new.diubah_oleh);
 
   if new.status = old.status then
-    return new;   -- status tidak berubah (misal hanya ubah catatan)
+    -- status tidak berubah (misal hanya ubah catatan); kolom batal tidak boleh diisi
+    new.dibatalkan_oleh_klub := old.dibatalkan_oleh_klub;
+    new.alasan_batal  := old.alasan_batal;
+    new.metode_refund := old.metode_refund;
+    return new;
   end if;
 
   if not (
@@ -307,6 +384,38 @@ begin
     end if;
   end if;
 
+  -- Pendapatan hanya boleh diakui setelah jam main dimulai
+  if new.status = 'selesai' and auth.uid() is not null
+     and (new.tanggal + new.jam_mulai) > waktu_wib() then
+    raise exception 'Booking % belum dimainkan (jadwal % %)',
+      new.kode_booking, to_char(new.tanggal, 'DD-MM-YYYY'), to_char(new.jam_mulai, 'HH24:MI');
+  end if;
+
+  -- Pembatalan: tentukan hasilnya sesuai kebijakan
+  if new.status = 'batal' then
+    select coalesce(sum(jumlah), 0) into v_dibayar from pembayaran where booking_id = new.id;
+
+    if new.pembelian_paket_id is not null or v_dibayar = 0 then
+      new.hasil_batal   := 'tanpa_dana';
+      new.metode_refund := null;
+    elsif coalesce(new.dibatalkan_oleh_klub, false)
+          or (new.tanggal + new.jam_mulai) - waktu_wib() >= interval '24 hours' then
+      new.hasil_batal   := 'refund';
+      new.metode_refund := coalesce(new.metode_refund, 'tunai');
+      if auth.uid() is not null and coalesce(peran_saya(), '') <> 'owner' then
+        raise exception 'Pembatalan ini menghasilkan pengembalian dana (refund) % dan harus dilakukan oleh owner',
+          rp(v_dibayar);
+      end if;
+    else
+      new.hasil_batal   := 'hangus';
+      new.metode_refund := null;
+    end if;
+  else
+    new.dibatalkan_oleh_klub := old.dibatalkan_oleh_klub;
+    new.alasan_batal  := old.alasan_batal;
+    new.metode_refund := old.metode_refund;
+  end if;
+
   return new;
 end;
 $$;
@@ -317,22 +426,34 @@ for each row execute function trg_booking_sebelum_update();
 
 
 -- ---------------------------------------------------------------------
--- 5. BOOKING - SESUDAH UPDATE (JURNAL OTOMATIS)
+-- 5. BOOKING - SESUDAH UPDATE (JURNAL OTOMATIS + RIWAYAT)
 --    a) SELESAI dimainkan -> pendapatan diakui:
 --         (D) Pendapatan Diterima di Muka  /  (K) Pendapatan Sewa Lapangan
 --       Berlaku juga untuk booking member: pendapatan diakui per jam dipakai.
---    b) BATAL -> DP hangus jadi pendapatan lain-lain:
---         (D) Pendapatan Diterima di Muka  /  (K) Pendapatan Lain-lain
---       Kalau booking member batal: jam paket dikembalikan, tanpa jurnal.
+--    b) BATAL:
+--         hangus -> (D) Pendapatan Diterima di Muka / (K) Pendapatan Lain-lain
+--         refund -> (D) Pendapatan Diterima di Muka / (K) Kas / Bank / QRIS
+--         booking member -> jam paket dikembalikan, tanpa jurnal
 -- ---------------------------------------------------------------------
 create or replace function trg_booking_sesudah_update() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
-  v_dibayar numeric;
+  v_dibayar    numeric;
+  v_keterangan text;
 begin
   if new.status = old.status then
     return new;
   end if;
+
+  v_keterangan := case
+    when new.status = 'selesai' then 'Sesi selesai dimainkan'
+    when new.status = 'batal'   then 'Dibatalkan oleh ' ||
+         case when new.dibatalkan_oleh_klub then 'klub' else 'pelanggan' end ||
+         ' (' || new.hasil_batal || ')' || coalesce(': ' || new.alasan_batal, '')
+    else 'Status pembayaran diperbarui' end;
+
+  insert into riwayat_status_booking (booking_id, status_lama, status_baru, keterangan, oleh)
+  values (new.id, old.status, new.status, v_keterangan, auth.uid());
 
   if new.status = 'selesai' then
     perform buat_jurnal(
@@ -352,11 +473,19 @@ begin
        where id = new.pembelian_paket_id;
     else
       select coalesce(sum(jumlah), 0) into v_dibayar from pembayaran where booking_id = new.id;
-      perform buat_jurnal(
-        current_date,
-        'DP hangus - pembatalan booking ' || new.kode_booking,
-        'booking', new.id,
-        '2-101', '4-201', v_dibayar);   -- kalau v_dibayar = 0, tidak ada jurnal
+      if new.hasil_batal = 'refund' then
+        perform buat_jurnal(
+          hari_ini_wib(),
+          'Refund pembatalan booking ' || new.kode_booking || ' (' || new.metode_refund || ')',
+          'booking', new.id,
+          '2-101', akun_kas(new.metode_refund), v_dibayar);
+      elsif new.hasil_batal = 'hangus' then
+        perform buat_jurnal(
+          hari_ini_wib(),
+          'DP hangus - pembatalan booking ' || new.kode_booking,
+          'booking', new.id,
+          '2-101', '4-201', v_dibayar);
+      end if;
     end if;
   end if;
 
@@ -373,6 +502,7 @@ for each row execute function trg_booking_sesudah_update();
 -- 6. PEMBAYARAN - SEBELUM INSERT (validasi)
 --    - hanya untuk booking reguler berstatus menunggu / dp
 --    - jumlah tidak boleh melebihi sisa tagihan
+--    - tanggal divalidasi (tidak di masa depan, maks. mundur 3 hari kecuali owner)
 --    - jenis otomatis: 'pelunasan' kalau melunasi, selain itu 'dp'
 -- ---------------------------------------------------------------------
 create or replace function trg_pembayaran_sebelum_insert() returns trigger
@@ -382,6 +512,8 @@ declare
   v_dibayar numeric;
   v_sisa    numeric;
 begin
+  perform cek_tanggal_transaksi(new.tanggal, 'pembayaran');
+
   select * into v_booking from booking where id = new.booking_id for update;
   if not found then
     raise exception 'Booking tidak ditemukan';
@@ -401,7 +533,8 @@ begin
     raise exception 'Jumlah pembayaran melebihi sisa tagihan (%)', rp(v_sisa);
   end if;
 
-  new.jenis := case when new.jumlah = v_sisa then 'pelunasan' else 'dp' end;
+  new.jenis       := case when new.jumlah = v_sisa then 'pelunasan' else 'dp' end;
+  new.dibuat_oleh := coalesce(auth.uid(), new.dibuat_oleh);
   return new;
 end;
 $$;
@@ -414,7 +547,7 @@ for each row execute function trg_pembayaran_sebelum_insert();
 -- ---------------------------------------------------------------------
 -- 7. PEMBAYARAN - SESUDAH INSERT (JURNAL OTOMATIS)
 --    Terima DP / pelunasan:
---      (D) Kas  /  (K) Pendapatan Diterima di Muka
+--      (D) Kas / Bank / QRIS (sesuai metode)  /  (K) Pendapatan Diterima di Muka
 --    Belum jadi pendapatan karena lapangan BELUM dipakai.
 --    Lalu status booking diperbarui menjadi 'dp' atau 'lunas'.
 -- ---------------------------------------------------------------------
@@ -431,7 +564,7 @@ begin
     case when new.jenis = 'dp' then 'Penerimaan DP booking ' else 'Pelunasan booking ' end
       || v_booking.kode_booking || ' (' || new.metode_bayar || ')',
     'pembayaran', new.id,
-    '1-101', '2-101', new.jumlah);
+    akun_kas(new.metode_bayar), '2-101', new.jumlah);
 
   select coalesce(sum(jumlah), 0) into v_dibayar from pembayaran where booking_id = new.booking_id;
 
@@ -458,6 +591,8 @@ language plpgsql security definer set search_path = public as $$
 declare
   v_paket paket_member%rowtype;
 begin
+  perform cek_tanggal_transaksi(new.tanggal_beli, 'pembelian paket');
+
   select * into v_paket from paket_member where id = new.paket_id;
   if not found then
     raise exception 'Paket member tidak ditemukan';
@@ -470,6 +605,9 @@ begin
   new.jam_total          := v_paket.jumlah_jam;
   new.jam_terpakai       := 0;
   new.tanggal_kadaluarsa := new.tanggal_beli + v_paket.masa_berlaku_hari;
+  new.breakage_diakui    := false;
+  new.nilai_breakage     := 0;
+  new.dibuat_oleh        := coalesce(auth.uid(), new.dibuat_oleh);
   return new;
 end;
 $$;
@@ -482,8 +620,9 @@ for each row execute function trg_pembelian_paket_sebelum_insert();
 -- ---------------------------------------------------------------------
 -- 9. PEMBELIAN PAKET - SESUDAH INSERT (JURNAL OTOMATIS)
 --    Beli paket member:
---      (D) Kas  /  (K) Pendapatan Diterima di Muka
---    Pendapatan baru diakui per jam dipakai (lihat trigger no. 5).
+--      (D) Kas / Bank / QRIS  /  (K) Pendapatan Diterima di Muka
+--    Pendapatan baru diakui per jam dipakai (lihat trigger no. 5),
+--    sisanya diakui saat paket kedaluwarsa (lihat fungsi no. 14).
 -- ---------------------------------------------------------------------
 create or replace function trg_pembelian_paket_sesudah_insert() returns trigger
 language plpgsql security definer set search_path = public as $$
@@ -498,7 +637,7 @@ begin
     new.tanggal_beli,
     'Penjualan ' || v_nama_paket || ' - ' || v_nama_pelanggan || ' (' || new.metode_bayar || ')',
     'pembelian_paket', new.id,
-    '1-101', '2-101', new.harga);
+    akun_kas(new.metode_bayar), '2-101', new.harga);
   return new;
 end;
 $$;
@@ -515,9 +654,11 @@ for each row execute function trg_pembelian_paket_sesudah_insert();
 create or replace function trg_sewa_sebelum_insert() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
-  v_alat          peralatan%rowtype;
+  v_alat           peralatan%rowtype;
   v_status_booking text;
 begin
+  perform cek_tanggal_transaksi(new.tanggal_sewa, 'sewa');
+
   select status into v_status_booking from booking where id = new.booking_id;
   if not found then
     raise exception 'Booking tidak ditemukan';
@@ -535,12 +676,14 @@ begin
     raise exception 'Stok % tidak cukup (tersedia %)', v_alat.nama, v_alat.stok;
   end if;
 
-  new.tarif           := v_alat.tarif_sewa;
-  new.subtotal        := v_alat.tarif_sewa * new.jumlah;
-  new.status_kembali  := 'dipinjam';
-  new.jumlah_rusak    := 0;
-  new.denda           := 0;
-  new.tanggal_kembali := null;
+  new.tarif             := v_alat.tarif_sewa;
+  new.subtotal          := v_alat.tarif_sewa * new.jumlah;
+  new.status_kembali    := 'dipinjam';
+  new.jumlah_rusak      := 0;
+  new.denda             := 0;
+  new.tanggal_kembali   := null;
+  new.dikembalikan_oleh := null;
+  new.dibuat_oleh       := coalesce(auth.uid(), new.dibuat_oleh);
   return new;
 end;
 $$;
@@ -553,7 +696,7 @@ for each row execute function trg_sewa_sebelum_insert();
 -- ---------------------------------------------------------------------
 -- 11. SEWA PERALATAN - SESUDAH INSERT
 --     Stok BERKURANG + JURNAL OTOMATIS:
---       (D) Kas  /  (K) Pendapatan Sewa Peralatan
+--       (D) Kas / Bank / QRIS  /  (K) Pendapatan Sewa Peralatan
 -- ---------------------------------------------------------------------
 create or replace function trg_sewa_sesudah_insert() returns trigger
 language plpgsql security definer set search_path = public as $$
@@ -568,9 +711,9 @@ begin
 
   perform buat_jurnal(
     new.tanggal_sewa,
-    'Sewa ' || new.jumlah || ' ' || v_nama_alat || ' - ' || v_kode,
+    'Sewa ' || new.jumlah || ' ' || v_nama_alat || ' - ' || v_kode || ' (' || new.metode_bayar || ')',
     'sewa_peralatan', new.id,
-    '1-101', '4-102', new.subtotal);
+    akun_kas(new.metode_bayar), '4-102', new.subtotal);
   return new;
 end;
 $$;
@@ -582,9 +725,10 @@ for each row execute function trg_sewa_sesudah_insert();
 
 -- ---------------------------------------------------------------------
 -- 12. SEWA PERALATAN - SEBELUM UPDATE (proses pengembalian)
---     Frontend cukup mengirim status_kembali ('dikembalikan' / 'rusak'),
---     jumlah_rusak, dan (opsional) denda. Jika denda 0 saat rusak,
---     denda dihitung otomatis = jumlah_rusak x denda_rusak per unit.
+--     Frontend cukup mengirim status_kembali ('dikembalikan' / 'rusak')
+--     dan jumlah_rusak. DENDA SELALU DIHITUNG SERVER:
+--       denda = jumlah_rusak x denda_rusak per unit
+--     (nilai denda dari aplikasi diabaikan).
 -- ---------------------------------------------------------------------
 create or replace function trg_sewa_sebelum_update() returns trigger
 language plpgsql security definer set search_path = public as $$
@@ -601,7 +745,9 @@ begin
   new.jumlah       := old.jumlah;
   new.tarif        := old.tarif;
   new.subtotal     := old.subtotal;
+  new.metode_bayar := old.metode_bayar;
   new.tanggal_sewa := old.tanggal_sewa;
+  new.dibuat_oleh  := old.dibuat_oleh;
 
   if new.status_kembali = 'dipinjam' then
     new.jumlah_rusak := 0;
@@ -609,7 +755,13 @@ begin
     return new;
   end if;
 
-  new.tanggal_kembali := coalesce(new.tanggal_kembali, current_date);
+  -- Tanggal kembali: pengguna aplikasi -> hari ini (server); SQL Editor -> sesuai isian
+  if auth.uid() is not null then
+    new.tanggal_kembali := hari_ini_wib();
+  else
+    new.tanggal_kembali := coalesce(new.tanggal_kembali, current_date);
+  end if;
+  new.dikembalikan_oleh := coalesce(auth.uid(), new.dikembalikan_oleh);
 
   if new.status_kembali = 'dikembalikan' then
     new.jumlah_rusak := 0;
@@ -618,10 +770,8 @@ begin
     if new.jumlah_rusak < 1 or new.jumlah_rusak > old.jumlah then
       raise exception 'Jumlah rusak harus antara 1 dan %', old.jumlah;
     end if;
-    if coalesce(new.denda, 0) = 0 then
-      select denda_rusak into v_denda_unit from peralatan where id = old.peralatan_id;
-      new.denda := new.jumlah_rusak * v_denda_unit;
-    end if;
+    select denda_rusak into v_denda_unit from peralatan where id = old.peralatan_id;
+    new.denda := new.jumlah_rusak * v_denda_unit;
   end if;
 
   return new;
@@ -638,7 +788,7 @@ for each row execute function trg_sewa_sebelum_update();
 --     Stok BERTAMBAH lagi sebanyak unit yang kembali dalam kondisi baik
 --     (unit rusak tidak kembali ke stok).
 --     Jika ada denda -> JURNAL OTOMATIS:
---       (D) Kas  /  (K) Pendapatan Denda
+--       (D) Kas / Bank / QRIS  /  (K) Pendapatan Denda
 -- ---------------------------------------------------------------------
 create or replace function trg_sewa_sesudah_update() returns trigger
 language plpgsql security definer set search_path = public as $$
@@ -655,9 +805,10 @@ begin
       select kode_booking into v_kode from booking where id = new.booking_id;
       perform buat_jurnal(
         new.tanggal_kembali,
-        'Denda kerusakan ' || new.jumlah_rusak || ' ' || v_nama_alat || ' - ' || v_kode,
+        'Denda kerusakan ' || new.jumlah_rusak || ' ' || v_nama_alat || ' - ' || v_kode
+          || ' (' || new.metode_bayar || ')',
         'sewa_peralatan', new.id,
-        '1-101', '4-103', new.denda);
+        akun_kas(new.metode_bayar), '4-103', new.denda);
     end if;
   end if;
   return new;
@@ -667,3 +818,85 @@ $$;
 create or replace trigger sewa_sesudah_update
 after update on sewa_peralatan
 for each row execute function trg_sewa_sesudah_update();
+
+
+-- ---------------------------------------------------------------------
+-- 14. PENGAKUAN SISA PAKET MEMBER KEDALUWARSA (breakage)
+--     Paket yang sudah lewat masa berlaku dan masih punya sisa nilai:
+--       (D) Pendapatan Diterima di Muka  /  (K) Pendapatan Paket Member Kedaluwarsa
+--     Nilai = harga paket - nilai semua booking paket yang tidak batal
+--     (booking yang belum diselesaikan tetap menunggu pengakuan biasa).
+--     Dipanggil otomatis saat Dashboard dibuka; aman dipanggil berulang.
+-- ---------------------------------------------------------------------
+create or replace function akui_breakage_paket() returns int
+language plpgsql security definer set search_path = public as $$
+declare
+  v_paket   record;
+  v_terpakai numeric;
+  v_sisa     numeric;
+  v_jumlah   int := 0;
+begin
+  if auth.uid() is not null and peran_saya() is null then
+    raise exception 'Akses ditolak';
+  end if;
+
+  for v_paket in
+    select pp.*, pm.nama_paket, p.nama as nama_pelanggan
+    from pembelian_paket pp
+    join paket_member pm on pm.id = pp.paket_id
+    join pelanggan p on p.id = pp.pelanggan_id
+    where pp.tanggal_kadaluarsa < hari_ini_wib() and not pp.breakage_diakui
+    for update of pp
+  loop
+    select coalesce(sum(total_harga), 0) into v_terpakai
+    from booking where pembelian_paket_id = v_paket.id and status <> 'batal';
+    v_sisa := v_paket.harga - v_terpakai;
+
+    if v_sisa > 0 then
+      perform buat_jurnal(
+        v_paket.tanggal_kadaluarsa,
+        'Pengakuan sisa ' || v_paket.nama_paket || ' kedaluwarsa - ' || v_paket.nama_pelanggan
+          || ' (' || (v_paket.jam_total - v_paket.jam_terpakai) || ' jam tidak terpakai)',
+        'pembelian_paket', v_paket.id,
+        '2-101', '4-104', v_sisa);
+      v_jumlah := v_jumlah + 1;
+    end if;
+
+    update pembelian_paket
+       set breakage_diakui = true, nilai_breakage = greatest(v_sisa, 0)
+     where id = v_paket.id;
+  end loop;
+
+  return v_jumlah;
+end;
+$$;
+
+revoke execute on function akui_breakage_paket() from public, anon;
+grant  execute on function akui_breakage_paket() to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 15. SELESAIKAN BOOKING LEWAT WAKTU (aksi massal dari Dashboard)
+--     Semua booking LUNAS yang jam mainnya sudah berakhir ditandai selesai
+--     -> pendapatan diakui (lewat trigger no. 5) dan tercatat di riwayat.
+--     "security invoker": berjalan dengan hak pengguna yang login (RLS berlaku).
+-- ---------------------------------------------------------------------
+create or replace function selesaikan_booking_lewat_waktu() returns int
+language plpgsql security invoker set search_path = public as $$
+declare
+  v_jumlah int;
+begin
+  if peran_saya() is null then
+    raise exception 'Akses ditolak';
+  end if;
+
+  update booking set status = 'selesai'
+   where status = 'lunas'
+     and (tanggal + jam_selesai) <= waktu_wib();
+  get diagnostics v_jumlah = row_count;
+  return v_jumlah;
+end;
+$$;
+
+revoke execute on function selesaikan_booking_lewat_waktu() from public, anon;
+grant  execute on function selesaikan_booking_lewat_waktu() to authenticated;

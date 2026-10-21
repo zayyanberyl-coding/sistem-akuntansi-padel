@@ -3,32 +3,36 @@
 Tugas UTS mata kuliah **Pengkodean dan Pemrograman** – S1 Akuntansi.
 
 🌐 **Demo website:** https://zayyanberyl-coding.github.io/sistem-akuntansi-padel/
+(memerlukan login; akun demo diberikan terpisah saat presentasi)
 
 Web app satu halaman (single-page) untuk mencatat booking lapangan padel, pembayaran,
 sewa peralatan, dan penjualan paket member. Setiap transaksi **otomatis dijurnal**
 oleh trigger database, lalu diringkas menjadi Jurnal Umum, Buku Besar, dan Laporan Pendapatan.
+"Smash Padel Club" adalah nama contoh; seluruh data di database adalah **data simulasi**.
 
 ## Teknologi
 
 | Bagian   | Teknologi |
 |----------|-----------|
 | Frontend | HTML, CSS, JavaScript murni (tanpa framework), satu `index.html` dengan sidebar |
-| Backend  | [Supabase](https://supabase.com) (PostgreSQL) + trigger PL/pgSQL |
-| Koneksi  | `supabase-js` v2 via CDN, memakai **anon key** saja |
+| Backend  | [Supabase](https://supabase.com) (PostgreSQL) + trigger PL/pgSQL + Row Level Security |
+| Login    | Supabase Auth (email + password), peran **owner** dan **admin** |
+| Koneksi  | `supabase-js` v2 via CDN, memakai **anon / publishable key** saja |
 | Tampilan | Font [Inter](https://fonts.google.com/specimen/Inter), ikon [Tabler Icons](https://tabler.io/icons), foto dari [Unsplash](https://unsplash.com/s/photos/padel-court) (lisensi gratis) |
 
 ## Fitur
 
 | Menu | Isi |
 |------|-----|
-| **Dashboard** | Booking hari ini, pendapatan bulan ini, saldo kas, saldo pendapatan diterima di muka, jadwal hari ini, stok peralatan |
-| **Booking** | Form booking, pratinjau tarif normal/prime time, **cek bentrok jadwal**, grid jadwal lapangan, tandai selesai/batal |
-| **Pembayaran** | Terima DP / pelunasan, status booking otomatis jadi `dp` / `lunas` |
-| **Peralatan** | Kelola raket & bola, sewa peralatan (stok otomatis berkurang), pengembalian (stok bertambah) dan denda kerusakan |
-| **Member** | Data pelanggan, jenis paket member, penjualan paket (sisa jam & masa berlaku) |
-| **Jurnal Umum** | Jurnal otomatis per periode + cek keseimbangan debit/kredit |
+| **Login** | Hanya staf terdaftar yang bisa membuka aplikasi; data pelanggan tidak bisa dibaca publik |
+| **Dashboard** | Pendapatan bulan ini, kas/bank/QRIS, pendapatan diterima di muka, rincian & donut pendapatan, tren harian, jam sibuk, pemakaian lapangan, jadwal berikutnya, **peringatan booking lewat waktu + tombol selesaikan massal** |
+| **Booking** | Form booking, pratinjau tarif normal/prime time, **cek bentrok jadwal**, grid jadwal, tandai selesai, **pembatalan dengan kebijakan refund/hangus**, **cetak konfirmasi booking** |
+| **Pembayaran** | Terima DP / pelunasan (tunai/transfer/QRIS), status otomatis `dp` / `lunas`, **cetak kwitansi** (dengan terbilang) |
+| **Peralatan** | Sewa raket & bola (stok otomatis berkurang), pengembalian (stok bertambah), denda kerusakan dihitung server; tambah/edit peralatan khusus owner |
+| **Member** | Data pelanggan, jenis paket (khusus owner), penjualan paket, sisa jam, **pengakuan sisa paket kedaluwarsa** |
+| **Jurnal Umum** | Jurnal otomatis per periode + cek keseimbangan + siapa yang mencatat |
 | **Buku Besar** | Mutasi per akun dengan saldo awal dan saldo berjalan |
-| **Laporan Pendapatan** | Pendapatan per akun, rincian per lapangan, siap cetak |
+| **Laporan Pendapatan** | Pendapatan per akun, rincian per lapangan, **penerimaan & refund per metode (Kas/Bank/QRIS)**, siap cetak |
 
 ### Aturan tarif
 - Jam operasional 07.00–23.00, booking per jam penuh.
@@ -36,32 +40,52 @@ oleh trigger database, lalu diringkas menjadi Jurnal Umum, Buku Besar, dan Lapor
 - **Prime time**: Senin–Jumat 17.00–23.00, serta Sabtu–Minggu seharian.
 - Tarif dihitung per jam, jadi booking 16.00–18.00 di hari kerja = 1 jam normal + 1 jam prime.
 
+### Kebijakan pembatalan (ditentukan database, bukan browser)
+| Kondisi | Hasil | Siapa yang boleh |
+|---|---|---|
+| Booking paket member / belum ada pembayaran | Tanpa dana (jam paket dikembalikan) | owner & admin |
+| Batal oleh **klub**, atau oleh pelanggan **≥ 24 jam** sebelum main | **Refund** penuh | **owner saja** |
+| Batal oleh pelanggan **< 24 jam** sebelum main | Uang yang sudah dibayar **hangus** | owner & admin |
+
+### Pengendalian internal
+- Peran: **owner** (semua akses, tarif, stok, paket, refund) dan **admin** (operasional harian).
+- Tanggal transaksi tidak boleh di masa depan; mundur > 3 hari hanya owner.
+- Booking tidak bisa dibuat untuk tanggal lampau dan tidak bisa "selesai" sebelum jam main.
+- Tarif, denda, jenis pembayaran, dan hasil pembatalan dihitung server.
+- Setiap transaksi dan jurnal mencatat **siapa** pembuatnya; setiap perubahan status booking masuk **riwayat**.
+- Jurnal hanya bisa dibaca dari aplikasi; tidak ada izin `DELETE`.
+
 ## Logika Akuntansi (jurnal otomatis via trigger)
 
-| Transaksi | Debit | Kredit | Trigger |
-|-----------|-------|--------|---------|
-| Terima DP / pelunasan booking | Kas | Pendapatan Diterima di Muka | `pembayaran_sesudah_insert` |
+| Transaksi | Debit | Kredit | Trigger / fungsi |
+|-----------|-------|--------|------------------|
+| Terima DP / pelunasan booking | Kas / Bank / QRIS | Pendapatan Diterima di Muka | `pembayaran_sesudah_insert` |
 | Booking selesai dimainkan | Pendapatan Diterima di Muka | Pendapatan Sewa Lapangan | `booking_sesudah_update` |
-| Booking batal, DP hangus | Pendapatan Diterima di Muka | Pendapatan Lain-lain | `booking_sesudah_update` |
-| Beli paket member | Kas | Pendapatan Diterima di Muka | `pembelian_paket_sesudah_insert` |
+| Batal, uang hangus | Pendapatan Diterima di Muka | Pendapatan Lain-lain | `booking_sesudah_update` |
+| Batal, refund | Pendapatan Diterima di Muka | Kas / Bank / QRIS | `booking_sesudah_update` |
+| Beli paket member | Kas / Bank / QRIS | Pendapatan Diterima di Muka | `pembelian_paket_sesudah_insert` |
 | Main pakai paket (diakui per jam) | Pendapatan Diterima di Muka | Pendapatan Sewa Lapangan | `booking_sesudah_update` |
-| Sewa peralatan | Kas | Pendapatan Sewa Peralatan | `sewa_sesudah_insert` |
-| Denda kerusakan peralatan | Kas | Pendapatan Denda | `sewa_sesudah_update` |
+| Sisa paket kedaluwarsa (breakage) | Pendapatan Diterima di Muka | Pendapatan Paket Member Kedaluwarsa | `akui_breakage_paket()` |
+| Sewa peralatan | Kas / Bank / QRIS | Pendapatan Sewa Peralatan | `sewa_sesudah_insert` |
+| Denda kerusakan peralatan | Kas / Bank / QRIS | Pendapatan Denda | `sewa_sesudah_update` |
 
 **Mengapa DP dicatat sebagai Pendapatan Diterima di Muka?** Uang sudah diterima,
-tetapi jasanya (lapangan) belum diberikan. Sesuai prinsip akrual/PSAK 72,
-uang itu masih berupa **kewajiban** dan baru diakui sebagai pendapatan saat
-lapangan selesai dipakai.
+tetapi jasanya (lapangan) belum diberikan. Sesuai model pendapatan dari kontrak
+dengan pelanggan (PSAK 72, kini bernomor PSAK 115), uang itu masih berupa
+**liabilitas kontrak** dan baru diakui sebagai pendapatan saat lapangan dipakai.
 
 ### Bagan akun
 
 | Kode | Nama | Kategori | Saldo normal |
 |------|------|----------|--------------|
 | 1-101 | Kas | Aset | Debit |
+| 1-102 | Bank | Aset | Debit |
+| 1-103 | Saldo QRIS | Aset | Debit |
 | 2-101 | Pendapatan Diterima di Muka | Kewajiban | Kredit |
 | 4-101 | Pendapatan Sewa Lapangan | Pendapatan | Kredit |
 | 4-102 | Pendapatan Sewa Peralatan | Pendapatan | Kredit |
 | 4-103 | Pendapatan Denda | Pendapatan | Kredit |
+| 4-104 | Pendapatan Paket Member Kedaluwarsa | Pendapatan | Kredit |
 | 4-201 | Pendapatan Lain-lain | Pendapatan | Kredit |
 
 ### Alur status booking
@@ -69,7 +93,7 @@ lapangan selesai dipakai.
 ```
 menunggu ──bayar DP──▶ dp ──pelunasan──▶ lunas ──dimainkan──▶ selesai
     │                  │                   │
-    └──────────────────┴───────────────────┴──────▶ batal (DP hangus)
+    └──────────────────┴───────────────────┴──────▶ batal (refund / hangus / tanpa dana)
 ```
 Booking dengan paket member langsung berstatus `lunas` dan jam paketnya dipotong.
 Jika dibatalkan, jam paket dikembalikan.
@@ -78,6 +102,9 @@ Jika dibatalkan, jam paket dikembalikan.
 
 ```mermaid
 erDiagram
+    PENGGUNA ||--o{ BOOKING : mencatat
+    PENGGUNA ||--o{ PEMBAYARAN : mencatat
+    PENGGUNA ||--o{ JURNAL : memicu
     PELANGGAN ||--o{ BOOKING : memesan
     PELANGGAN ||--o{ PEMBELIAN_PAKET : membeli
     LAPANGAN ||--o{ BOOKING : dipesan
@@ -85,10 +112,16 @@ erDiagram
     PEMBELIAN_PAKET |o--o{ BOOKING : dipakai_untuk
     BOOKING ||--o{ PEMBAYARAN : dibayar
     BOOKING ||--o{ SEWA_PERALATAN : menyewa
+    BOOKING ||--o{ RIWAYAT_STATUS_BOOKING : tercatat
     PERALATAN ||--o{ SEWA_PERALATAN : disewa
     JURNAL ||--|{ JURNAL_DETAIL : berisi
     AKUN ||--o{ JURNAL_DETAIL : dicatat_di
 
+    PENGGUNA {
+        uuid id PK
+        text nama
+        text peran
+    }
     LAPANGAN {
         bigint id PK
         text nama
@@ -122,6 +155,9 @@ erDiagram
         int jam_total
         int jam_terpakai
         text metode_bayar
+        boolean breakage_diakui
+        numeric nilai_breakage
+        uuid dibuat_oleh FK
     }
     BOOKING {
         bigint id PK
@@ -136,6 +172,10 @@ erDiagram
         text jenis_tarif
         numeric total_harga
         text status
+        boolean dibatalkan_oleh_klub
+        text hasil_batal
+        text metode_refund
+        uuid dibuat_oleh FK
     }
     PEMBAYARAN {
         bigint id PK
@@ -144,6 +184,7 @@ erDiagram
         text jenis
         numeric jumlah
         text metode_bayar
+        uuid dibuat_oleh FK
     }
     PERALATAN {
         bigint id PK
@@ -159,9 +200,20 @@ erDiagram
         bigint peralatan_id FK
         int jumlah
         numeric subtotal
+        text metode_bayar
         text status_kembali
         int jumlah_rusak
         numeric denda
+        uuid dibuat_oleh FK
+    }
+    RIWAYAT_STATUS_BOOKING {
+        bigint id PK
+        bigint booking_id FK
+        text status_lama
+        text status_baru
+        text keterangan
+        uuid oleh FK
+        timestamptz waktu
     }
     AKUN {
         text kode PK
@@ -176,6 +228,7 @@ erDiagram
         text keterangan
         text sumber
         bigint sumber_id
+        uuid dibuat_oleh FK
     }
     JURNAL_DETAIL {
         bigint id PK
@@ -191,18 +244,20 @@ erDiagram
 ```
 sistem-akuntansi-padel/
 ├── backend/
-│   ├── schema.sql      # 11 tabel, relasi, view, keamanan (RLS)
-│   ├── triggers.sql    # fungsi tarif, cek bentrok, stok, jurnal otomatis
-│   ├── seed.sql        # data contoh (sedikit)
+│   ├── schema.sql         # 13 tabel, relasi, view, keamanan (RLS & peran)
+│   ├── triggers.sql       # tarif, cek bentrok, stok, kebijakan batal, jurnal otomatis
+│   ├── seed.sql           # data contoh (sedikit) + hubungkan akun login ke peran
 │   └── seed_tambahan.sql  # data contoh 1,5 bulan (opsional)
 ├── frontend/
-│   ├── index.html      # satu halaman + sidebar
+│   ├── index.html         # satu halaman + sidebar
 │   ├── css/style.css
-│   ├── img/logo.svg    # logo Smash Padel Club (juga dipakai sebagai favicon)
+│   ├── img/logo.svg       # logo Smash Padel Club (juga dipakai sebagai favicon)
 │   └── js/
-│       ├── supabase.js    # koneksi (URL + anon key)
+│       ├── supabase.js    # koneksi (URL + publishable key)
 │       ├── app.js         # fungsi bantu + pindah menu
+│       ├── auth.js        # login, logout, peran pengguna
 │       ├── animasi.js     # animasi & efek interaksi (count-up, skeleton, dll.)
+│       ├── cetak.js       # cetak konfirmasi booking & kwitansi
 │       ├── dashboard.js
 │       ├── booking.js
 │       ├── pembayaran.js
@@ -211,59 +266,63 @@ sistem-akuntansi-padel/
 │       ├── jurnal.js
 │       ├── bukubesar.js
 │       └── laporan.js
-├── index.html          # pengalih ke frontend/ (untuk GitHub Pages)
+├── index.html             # pengalih ke frontend/ (untuk GitHub Pages)
 ├── .gitignore
 └── README.md
 ```
 
 ## Cara Menjalankan
 
-### 1. Siapkan database di Supabase
-1. Buat akun & project baru di [supabase.com](https://supabase.com).
-2. Buka **SQL Editor** → **New query**.
-3. Salin isi `backend/schema.sql` → **Run**.
-4. Salin isi `backend/triggers.sql` → **Run**.
-5. Salin isi `backend/seed.sql` → **Run**. Hasil terakhir harus menunjukkan
-   `total_debit` = `total_kredit` (nominalnya bisa berbeda tergantung hari
-   dijalankan, karena tanggal contoh dihitung dari hari ini dan tarif akhir pekan berbeda).
-6. *(Opsional)* Salin isi `backend/seed_tambahan.sql` → **Run**, cukup sekali.
-   Menambah ±25 pelanggan dan ±700 booking selama 45 hari terakhir s.d. 10 hari
-   ke depan (prime time & akhir pekan lebih ramai), lengkap dengan pembayaran,
-   pembatalan, dan sewa peralatan, supaya dashboard & laporan terlihat realistis.
+### 1. Buat akun login
+1. Buat project di [supabase.com](https://supabase.com).
+2. **Authentication → Sign In / Providers**: matikan *Allow new users to sign up*
+   (supaya orang lain tidak bisa mendaftar sendiri).
+3. **Authentication → Users → Add user → Create new user**, centang *Auto Confirm User*:
+   - `owner@smashpadel.test` (peran owner)
+   - `admin@smashpadel.test` (peran admin)
 
-> `schema.sql` menghapus tabel lama sebelum membuat ulang. Jangan dijalankan
-> ulang jika datamu sudah penting.
+   Boleh memakai email lain; sesuaikan email di bagian 0 `backend/seed.sql`.
 
-### 2. Hubungkan frontend
-1. Di Supabase buka **Project Settings → API**.
-2. Salin **Project URL** dan **anon / publishable key**.
-3. Tempel ke `frontend/js/supabase.js`:
-   ```js
-   const SUPABASE_URL = 'https://abcdxyz.supabase.co';
-   const SUPABASE_ANON_KEY = 'eyJhbGciOi...';
-   ```
+### 2. Siapkan database
+Di **SQL Editor → New query**, jalankan berurutan:
+1. `backend/schema.sql`
+2. `backend/triggers.sql`
+3. `backend/seed.sql` — hasil terakhir harus menunjukkan `total_debit` = `total_kredit`
+4. *(Opsional)* `backend/seed_tambahan.sql` — cukup sekali; menambah ±25 pelanggan dan
+   ±650 booking selama 45 hari terakhir s.d. 10 hari ke depan, lengkap dengan pembayaran,
+   pembatalan (hangus & refund), sewa peralatan, dan paket kedaluwarsa.
+
+> `schema.sql` menghapus tabel lama sebelum membuat ulang (akun login tidak ikut terhapus).
+> Menjalankan ulang keempat file juga cara menyegarkan data demo agar tanggalnya mengikuti hari ini.
+
+### 3. Hubungkan frontend
+1. **Project Settings → API Keys**: salin **Project URL** dan **Publishable key** (atau *anon* key).
+2. Tempel ke `frontend/js/supabase.js`.
 
 > ⚠ **Jangan pernah** memakai `service_role` / `secret` key di frontend. Key itu
 > melewati semua aturan keamanan. Aplikasi ini akan menolak berjalan jika key
 > tersebut terdeteksi.
 
-### 3. Jalankan
-- Cara termudah: di VS Code pasang ekstensi **Live Server**, klik kanan
-  `frontend/index.html` → **Open with Live Server**.
-- Atau cukup klik dua kali `frontend/index.html` untuk membukanya di browser.
+### 4. Jalankan
+- Di VS Code pasang ekstensi **Live Server**, klik kanan `frontend/index.html` → **Open with Live Server**,
+  lalu login dengan salah satu akun di langkah 1.
 
 ## Keamanan
-- Aplikasi hanya memakai **anon key**; keamanan dijaga oleh **Row Level Security**.
-- Tabel `jurnal` dan `jurnal_detail` hanya bisa **dibaca** dari aplikasi. Isinya
-  dibuat oleh trigger (`security definer`), sehingga jurnal tidak bisa dipalsukan.
-- Tidak ada izin `DELETE`. Transaksi dibatalkan lewat status, sehingga jejak audit tetap ada.
-- Harga, status, stok, dan bentrok jadwal divalidasi ulang di database, bukan hanya di browser.
+- Pengunjung tanpa login **tidak bisa membaca maupun menulis data** apa pun (hak `anon` dicabut).
+- Akun login yang belum diberi peran tidak melihat data (RLS memeriksa tabel `pengguna`).
+- Jurnal hanya bisa **dibaca**; isinya dibuat trigger (`security definer`), sehingga tidak bisa dipalsukan.
+- Fungsi `buat_jurnal` tidak bisa dipanggil dari aplikasi.
+- Tidak ada izin `DELETE`; transaksi dibatalkan lewat status sehingga jejak audit tetap ada.
+- Pemindaian rahasia pada seluruh file & riwayat Git: tidak ada secret key.
+
+## Pengujian
+Skema, trigger, dan data contoh diuji pada PostgreSQL 18 (PGlite) dengan tiruan modul Auth Supabase,
+termasuk 20 skenario otorisasi & kontrol (akses anon, akun tanpa peran, tanggal mundur/maju,
+refund oleh admin vs owner, denda manipulatif, ubah tarif oleh admin, tulis/hapus jurnal) — seluruhnya lulus.
 
 ## Keterbatasan
-- Belum ada login. Siapa pun yang memegang anon key bisa menambah data (cukup untuk tugas kuliah).
-  Untuk produksi, tambahkan Supabase Auth dan batasi policy ke role `authenticated`.
-- Sisa jam paket member yang kadaluarsa masih tercatat di Pendapatan Diterima di Muka.
-  Idealnya diakui sebagai pendapatan (breakage) lewat jurnal penyesuaian.
-- Pembelian stok peralatan baru tidak dijurnal (sistem fokus pada siklus pendapatan).
-- Supabase membatasi 1.000 baris per query. Cukup untuk demo, tetapi untuk data besar
-  ringkasan sebaiknya dihitung dengan view/fungsi SQL.
+- Data dan nama usaha bersifat simulasi; belum divalidasi dengan klub padel nyata.
+- Pajak daerah (PBJT) belum diterapkan; objek dan tarifnya bergantung Perda setempat.
+- Pembelian stok peralatan baru dan biaya MDR QRIS tidak dijurnal (sistem fokus pada siklus pendapatan).
+- Paket Supabase Free menjeda project setelah 1 minggu tidak aktif dan tanpa backup otomatis;
+  untuk operasi nyata disarankan paket berbayar.

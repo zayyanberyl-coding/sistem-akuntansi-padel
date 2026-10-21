@@ -168,7 +168,7 @@ begin
               insert into pembayaran (booking_id, tanggal, jumlah, metode_bayar)
               values (v_booking.id, v_tanggal - (1 + floor(random() * 4))::int,
                       round(v_booking.total_harga * 0.5), v_metode[1 + floor(random() * 3)::int]);
-              update booking set status = 'batal', catatan = 'Pelanggan tidak datang' where id = v_booking.id;
+              update booking set status = 'batal', alasan_batal = 'Pelanggan tidak datang' where id = v_booking.id;
             else
               if v_acak < 0.62 then
                 -- DP 50% beberapa hari sebelumnya, pelunasan saat datang
@@ -187,7 +187,7 @@ begin
           else
             -- Booking member: hampir semua dimainkan
             if v_acak < 0.05 then
-              update booking set status = 'batal', catatan = 'Jadwal member dibatalkan' where id = v_booking.id;
+              update booking set status = 'batal', alasan_batal = 'Jadwal member dibatalkan' where id = v_booking.id;
             else
               update booking set status = 'selesai' where id = v_booking.id;
             end if;
@@ -199,8 +199,8 @@ begin
             v_jumlah := case when v_alat.jenis = 'bola' then 1 + floor(random() * 2)::int
                              else 2 + floor(random() * 3)::int end;
             if v_alat.stok >= v_jumlah then
-              insert into sewa_peralatan (booking_id, peralatan_id, jumlah, tanggal_sewa)
-              values (v_booking.id, v_alat.id, v_jumlah, v_tanggal)
+              insert into sewa_peralatan (booking_id, peralatan_id, jumlah, tanggal_sewa, metode_bayar)
+              values (v_booking.id, v_alat.id, v_jumlah, v_tanggal, v_metode[1 + floor(random() * 3)::int])
               returning id into v_sewa_id;
 
               if random() < 0.04 then
@@ -227,6 +227,13 @@ begin
                     v_booking.total_harga, v_metode[1 + floor(random() * 3)::int]);
           end if;
           -- sisanya masih 'menunggu' pembayaran
+
+          -- Sebagian kecil dibatalkan KLUB (mis. perawatan lapangan) -> refund
+          if v_acak < 0.65 and random() < 0.06 then
+            update booking set status = 'batal', dibatalkan_oleh_klub = true,
+                   alasan_batal = 'Perawatan lapangan', metode_refund = v_metode[1 + floor(random() * 3)::int]
+             where id = v_booking.id;
+          end if;
         end if;
 
         v_jam := v_jam + v_durasi;
@@ -245,6 +252,39 @@ begin
    where j.sumber = 'booking' and j.sumber_id = b.id
      and b.status = 'batal' and j.keterangan like 'DP hangus%'
      and b.tanggal < current_date;
+
+  -- -----------------------------------------------------------------
+  -- 6. Contoh paket kedaluwarsa yang tidak habis dipakai:
+  --    Teguh membeli Paket Silver (5 jam) 40 hari lalu, berlaku 30 hari,
+  --    tetapi hanya main 2 jam -> sisa 3 jam diakui sebagai pendapatan.
+  -- -----------------------------------------------------------------
+  insert into pembelian_paket (pelanggan_id, paket_id, tanggal_beli, metode_bayar)
+  select id, 1, current_date - 40, 'tunai' from pelanggan where nama = 'Teguh Prasetyo'
+  returning id into v_paket;
+
+  -- cari slot kosong 2 jam pada 35 hari lalu, lalu mainkan dengan paket tersebut
+  for v_jam in 7 .. 21 loop
+    exit when v_booking.pembelian_paket_id = v_paket;
+    for v_lap in select id from lapangan where aktif order by id loop
+      if not exists (
+        select 1 from booking
+        where lapangan_id = v_lap.id and tanggal = current_date - 35 and status <> 'batal'
+          and jam_mulai < make_time(v_jam + 2, 0, 0) and jam_selesai > make_time(v_jam, 0, 0)
+      ) then
+        insert into booking (pelanggan_id, lapangan_id, tanggal, jam_mulai, jam_selesai, pembelian_paket_id)
+        select id, v_lap.id, current_date - 35, make_time(v_jam, 0, 0), make_time(v_jam + 2, 0, 0), v_paket
+        from pelanggan where nama = 'Teguh Prasetyo'
+        returning * into v_booking;
+        update booking set status = 'selesai' where id = v_booking.id;
+        exit;
+      end if;
+    end loop;
+  end loop;
+
+  -- -----------------------------------------------------------------
+  -- 7. Akui sisa nilai paket member yang sudah kedaluwarsa (breakage)
+  -- -----------------------------------------------------------------
+  perform akui_breakage_paket();
 end;
 $$;
 

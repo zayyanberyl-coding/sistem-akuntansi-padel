@@ -12,7 +12,29 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3/dist/tabler-icons.min.css">
   <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
+<!-- class "belum-login": aplikasi disembunyikan sampai login dicek (auth.js) -->
+<body class="belum-login">
+
+  <!-- =============================================================
+       LAYAR LOGIN (tampil jika belum login)
+       Akun dibuat owner di Supabase > Authentication > Users.
+       ============================================================= -->
+  <div class="layar-login" id="layar-login" hidden>
+    <form class="kartu-login" id="form-login">
+      <img class="login-logo" src="img/logo.svg" alt="">
+      <h1>SMASH <span>PADEL CLUB</span></h1>
+      <p class="abu">Sistem Akuntansi Pendapatan — masuk untuk melanjutkan</p>
+      <label>Email
+        <input type="email" id="login-email" autocomplete="username" required>
+      </label>
+      <label>Password
+        <input type="password" id="login-password" autocomplete="current-password" required>
+      </label>
+      <p class="login-error" id="login-error" hidden></p>
+      <button type="submit" class="tombol tombol-utama">Masuk</button>
+      <p class="bantuan">Data pelanggan dan transaksi hanya dapat diakses staf yang terdaftar.</p>
+    </form>
+  </div>
 
   <!-- =============================================================
        SIDEBAR MENU
@@ -45,6 +67,18 @@
       <a href="#bukubesar"  data-page="bukubesar"><i class="ti ti-books"></i> Buku Besar</a>
       <a href="#laporan"    data-page="laporan"><i class="ti ti-report-money"></i> Laporan Pendapatan</a>
     </nav>
+
+    <!-- Pengguna yang sedang login + tombol keluar -->
+    <div class="pengguna-aktif">
+      <span class="avatar" id="pengguna-inisial">-</span>
+      <div>
+        <b id="pengguna-nama">-</b>
+        <span id="pengguna-peran">-</span>
+      </div>
+      <button class="ikon-bulat" id="tombol-keluar" type="button" title="Keluar" aria-label="Keluar">
+        <i class="ti ti-logout"></i>
+      </button>
+    </div>
   </aside>
 
   <!-- =============================================================
@@ -71,6 +105,9 @@
 
     <!-- ===================== 1. DASHBOARD ===================== -->
     <section class="page" id="page-dashboard">
+      <!-- Peringatan booking lewat waktu yang belum dituntaskan (diisi dashboard.js) -->
+      <div class="tindakan" id="dash-tindakan" hidden></div>
+
       <!-- Grid 12 kolom; posisi kartu diatur class d-... di style.css -->
       <div class="dash-grid">
 
@@ -107,7 +144,7 @@
           <div class="kartu">
             <div class="dua-angka">
               <div>
-                <small><i class="ti ti-wallet"></i> Saldo kas</small>
+                <small><i class="ti ti-wallet"></i> Kas, bank &amp; QRIS</small>
                 <div class="angka-sedang skeleton" id="dash-kas">-</div>
               </div>
               <div>
@@ -275,6 +312,37 @@
           </table>
         </div>
       </div>
+
+      <!-- Dialog pembatalan booking (kebijakan refund / hangus ditentukan server) -->
+      <dialog id="dialog-batal">
+        <form id="form-batal" method="dialog">
+          <h2>Batalkan Booking</h2>
+          <p id="bt-info"></p>
+          <label>Dibatalkan oleh
+            <select id="bt-oleh">
+              <option value="pelanggan">Pelanggan</option>
+              <option value="klub">Klub (perawatan, cuaca, dll.)</option>
+            </select>
+          </label>
+          <label>Alasan
+            <input type="text" id="bt-alasan" maxlength="200" placeholder="Pelanggan berhalangan" required>
+          </label>
+          <label id="bt-wrap-metode">Refund melalui
+            <select id="bt-metode">
+              <option value="tunai">Tunai (Kas)</option>
+              <option value="transfer">Transfer (Bank)</option>
+              <option value="qris">QRIS</option>
+            </select>
+          </label>
+          <div class="pratinjau" id="bt-hasil"></div>
+          <p class="bantuan">Kebijakan: batal oleh klub atau oleh pelanggan ≥ 24 jam sebelum main → uang dikembalikan
+            (refund, hanya owner). Batal oleh pelanggan &lt; 24 jam sebelum main → uang yang dibayar hangus.</p>
+          <div class="baris">
+            <button type="submit" class="tombol" value="batal" formnovalidate>Kembali</button>
+            <button type="submit" class="tombol tombol-utama" value="proses">Proses Pembatalan</button>
+          </div>
+        </form>
+      </dialog>
     </section>
 
     <!-- ===================== 3. PEMBAYARAN ===================== -->
@@ -306,7 +374,7 @@
             </label>
           </div>
           <button type="submit" class="tombol tombol-utama">Simpan Pembayaran</button>
-          <p class="bantuan">Jurnal otomatis: <b>Kas (D)</b> / <b>Pendapatan Diterima di Muka (K)</b>.
+          <p class="bantuan">Jurnal otomatis: <b>Kas/Bank/QRIS sesuai metode (D)</b> / <b>Pendapatan Diterima di Muka (K)</b>.
             Pendapatan baru diakui saat booking ditandai selesai.</p>
         </form>
 
@@ -315,7 +383,7 @@
           <div class="tabel-wrap">
             <table>
               <thead>
-                <tr><th>Tanggal</th><th>Booking</th><th>Pelanggan</th><th>Jenis</th><th>Metode</th><th class="angka">Jumlah</th></tr>
+                <tr><th>Tanggal</th><th>Booking</th><th>Pelanggan</th><th>Jenis</th><th>Metode</th><th class="angka">Jumlah</th><th>Dicatat oleh</th><th></th></tr>
               </thead>
               <tbody id="by-daftar"></tbody>
             </table>
@@ -338,12 +406,20 @@
           <label>Jumlah
             <input type="number" id="sw-jumlah" min="1" step="1" value="1" required>
           </label>
+          <label>Metode Bayar
+            <select id="sw-metode">
+              <option value="tunai">Tunai</option>
+              <option value="transfer">Transfer</option>
+              <option value="qris">QRIS</option>
+            </select>
+          </label>
           <div class="pratinjau" id="sw-info">-</div>
           <button type="submit" class="tombol tombol-utama">Simpan Sewa</button>
-          <p class="bantuan">Jurnal otomatis: <b>Kas (D)</b> / <b>Pendapatan Sewa Peralatan (K)</b>. Stok berkurang otomatis.</p>
+          <p class="bantuan">Jurnal otomatis: <b>Kas/Bank/QRIS sesuai metode (D)</b> / <b>Pendapatan Sewa Peralatan (K)</b>. Stok berkurang otomatis.</p>
         </form>
 
-        <form class="panel" id="form-peralatan">
+        <!-- khusus-owner: disembunyikan untuk admin (aturan sebenarnya dijaga RLS di database) -->
+        <form class="panel khusus-owner" id="form-peralatan">
           <h2 id="pr-judul-form">Tambah Peralatan</h2>
           <input type="hidden" id="pr-id">
           <label>Nama
@@ -408,11 +484,10 @@
           <label>Jumlah unit rusak
             <input type="number" id="kb-rusak" min="0" step="1" value="0">
           </label>
-          <label>Denda (Rp) — kosongkan/0 untuk hitung otomatis
-            <input type="number" id="kb-denda" min="0" step="1" value="0">
-          </label>
-          <p class="bantuan">Jika ada denda, jurnal otomatis: <b>Kas (D)</b> / <b>Pendapatan Denda (K)</b>.
-            Unit rusak tidak kembali ke stok.</p>
+          <!-- Denda tidak diketik manual: dihitung server = unit rusak x denda per unit -->
+          <div class="pratinjau" id="kb-denda-info">Tidak ada denda.</div>
+          <p class="bantuan">Jika ada denda, jurnal otomatis: <b>Kas/Bank/QRIS (D)</b> / <b>Pendapatan Denda (K)</b>,
+            memakai metode bayar saat sewa. Unit rusak tidak kembali ke stok.</p>
           <div class="baris-tombol">
             <button type="submit" class="tombol tombol-utama" value="simpan">Proses</button>
             <button type="submit" class="tombol" value="batal" formnovalidate>Batal</button>
@@ -442,7 +517,7 @@
           <div class="panel-header">
             <h2>Paket Membership</h2>
             <!-- Membuka modal (jendela melayang) untuk menambah jenis paket -->
-            <button type="button" class="tombol tombol-kecil" id="pk-buka-modal">
+            <button type="button" class="tombol tombol-kecil khusus-owner" id="pk-buka-modal">
               <i class="ti ti-plus"></i> Paket baru
             </button>
           </div>
@@ -465,7 +540,7 @@
             </label>
           </div>
           <button type="submit" class="tombol tombol-utama">Simpan Penjualan</button>
-          <p class="bantuan">Jurnal otomatis: <b>Kas (D)</b> / <b>Pendapatan Diterima di Muka (K)</b>.
+          <p class="bantuan">Jurnal otomatis: <b>Kas/Bank/QRIS sesuai metode (D)</b> / <b>Pendapatan Diterima di Muka (K)</b>.
             Diakui jadi pendapatan per jam dipakai.</p>
         </form>
       </div>
@@ -599,17 +674,23 @@
   <!-- Notifikasi kecil (toast) -->
   <div class="toast" id="toast"></div>
 
+  <!-- Area dokumen yang dicetak (konfirmasi booking / kwitansi), diisi cetak.js -->
+  <div class="area-cetak" id="area-cetak" hidden></div>
+
   <!-- =============================================================
        SCRIPT
        1. Library supabase-js dari CDN
        2. supabase.js  -> membuat koneksi (client)
        3. app.js       -> fungsi bantu + perpindahan menu
-       4. file per fitur
+       4. auth.js      -> login, logout, peran pengguna
+       5. file per fitur
        ============================================================= -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/supabase.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/auth.js"></script>
   <script src="js/animasi.js"></script>
+  <script src="js/cetak.js"></script>
   <script src="js/dashboard.js"></script>
   <script src="js/booking.js"></script>
   <script src="js/pembayaran.js"></script>

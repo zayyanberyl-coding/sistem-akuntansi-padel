@@ -93,9 +93,19 @@ function siapkanBooking() {
     if (tombol.dataset.aksi === 'bayar') {
       pembayaranBookingTerpilih = id;  // variabel di pembayaran.js
       location.hash = '#pembayaran';
+    } else if (tombol.dataset.aksi === 'cetak') {
+      cetakKonfirmasiBooking(id);      // cetak.js
+    } else if (tombol.dataset.aksi === 'batal') {
+      bukaDialogBatal(id);
     } else {
       ubahStatusBooking(id, tombol.dataset.aksi);
     }
+  });
+
+  // Dialog pembatalan: perbarui pratinjau hasil saat pilihan berubah
+  $('bt-oleh').addEventListener('change', perbaruiPratinjauBatal);
+  $('dialog-batal').addEventListener('close', () => {
+    if ($('dialog-batal').returnValue === 'proses') prosesPembatalan();
   });
 }
 
@@ -330,17 +340,24 @@ async function muatDaftarBooking() {
   bkDaftar = data;
 
   $('bk-daftar').innerHTML = data.length === 0 ? barisKosong(10) : data.map(b => {
-    let aksi = '-';
+    let aksi = '';
     if (b.status === 'menunggu' || b.status === 'dp') {
       aksi = `<button class="tombol tombol-kecil" data-aksi="bayar" data-id="${b.id}">Bayar</button>
               <button class="tombol tombol-kecil tombol-bahaya" data-aksi="batal" data-id="${b.id}">Batal</button>`;
     } else if (b.status === 'lunas') {
       aksi = `<button class="tombol tombol-kecil tombol-utama" data-aksi="selesai" data-id="${b.id}">Selesai</button>
               <button class="tombol tombol-kecil tombol-bahaya" data-aksi="batal" data-id="${b.id}">Batal</button>`;
+    } else if (b.status === 'batal' && b.hasil_batal) {
+      aksi = `<small class="abu">${{ refund: 'refund', hangus: 'uang hangus', tanpa_dana: 'tanpa dana' }[b.hasil_batal]}</small>`;
+    }
+    // Konfirmasi booking bisa dicetak untuk booking yang tidak batal
+    if (b.status !== 'batal') {
+      aksi += ` <button class="tombol tombol-kecil" data-aksi="cetak" data-id="${b.id}" title="Cetak konfirmasi booking">
+                  <i class="ti ti-printer"></i></button>`;
     }
     return `
       <tr data-id="${b.id}">
-        <td>${esc(b.kode_booking)}</td>
+        <td>${esc(b.kode_booking)}<br><small class="abu">oleh ${esc(b.nama_pembuat || 'data contoh')}</small></td>
         <td>${tanggalIndo(b.tanggal)}</td>
         <td>${jam(b.jam_mulai)}–${jam(b.jam_selesai)}</td>
         <td>${esc(b.nama_lapangan)}</td>
@@ -349,31 +366,93 @@ async function muatDaftarBooking() {
         <td class="angka">${rupiah(b.total_harga)}</td>
         <td class="angka">${rupiah(b.sisa_tagihan)}</td>
         <td>${badge(b.status)}</td>
-        <td>${aksi}</td>
+        <td>${aksi || '-'}</td>
       </tr>`;
   }).join('');
 }
 
-// Ubah status: 'selesai' (pendapatan diakui) atau 'batal' (DP hangus)
+// Tandai booking SELESAI dimainkan -> pendapatan diakui
 async function ubahStatusBooking(id, statusBaru) {
   const b = bkDaftar.find(x => x.id === id);
-  let pesan;
-  if (statusBaru === 'selesai') {
-    pesan = `Tandai ${b.kode_booking} SELESAI dimainkan?\n\n` +
-      `Jurnal otomatis: Pendapatan Diterima di Muka (D) / Pendapatan Sewa Lapangan (K) ${rupiah(b.total_harga)}`;
-  } else if (b.pembelian_paket_id) {
-    pesan = `Batalkan ${b.kode_booking}?\n\n${b.durasi_jam} jam akan dikembalikan ke paket member pelanggan.`;
-  } else {
-    pesan = `Batalkan ${b.kode_booking}?\n\n` + (b.total_dibayar > 0
-      ? `Uang yang sudah dibayar (${rupiah(b.total_dibayar)}) HANGUS dan dicatat sebagai Pendapatan Lain-lain.`
-      : 'Belum ada pembayaran, tidak ada jurnal yang dibuat.');
-  }
+  const pesan = `Tandai ${b.kode_booking} SELESAI dimainkan?\n\n` +
+    `Jurnal otomatis: Pendapatan Diterima di Muka (D) / Pendapatan Sewa Lapangan (K) ${rupiah(b.total_harga)}`;
   if (!confirm(pesan)) return;
 
   const { error } = await db.from('booking').update({ status: statusBaru }).eq('id', id);
   if (adaError(error)) return;
 
-  tampilkanPesan(`Booking ${b.kode_booking} ${statusBaru === 'selesai' ? 'selesai, pendapatan diakui' : 'dibatalkan'}.`);
-  await Promise.all([muatJadwal(), muatDaftarBooking(), muatPaketPelanggan()]);
+  tampilkanPesan(`Booking ${b.kode_booking} selesai, pendapatan diakui.`);
+  await Promise.all([muatJadwal(), muatDaftarBooking()]);
   sorotBaris(`#bk-daftar tr[data-id="${id}"]`);   // baris yang diubah berkedip hijau
+}
+
+// ---------- Pembatalan ----------
+// Kebijakan (sama persis dengan trigger di database; database yang menentukan):
+//   paket member / belum bayar          -> tanpa dana (jam paket dikembalikan)
+//   batal oleh klub / >= 24 jam sebelum -> refund (hanya owner)
+//   batal oleh pelanggan < 24 jam       -> uang hangus (pendapatan lain-lain)
+let bkBatalTerpilih = null;
+
+function bukaDialogBatal(id) {
+  bkBatalTerpilih = bkDaftar.find(x => x.id === id);
+  const b = bkBatalTerpilih;
+  $('bt-info').innerHTML = `<b>${esc(b.kode_booking)}</b> · ${esc(b.nama_pelanggan)} · ${esc(b.nama_lapangan)},
+    ${tanggalIndo(b.tanggal)} ${jam(b.jam_mulai)}–${jam(b.jam_selesai)}<br>
+    Sudah dibayar: <b>${b.pembelian_paket_id ? 'paket member' : rupiah(b.total_dibayar)}</b>`;
+  $('bt-oleh').value = 'pelanggan';
+  $('bt-alasan').value = '';
+  $('bt-metode').value = 'tunai';
+  perbaruiPratinjauBatal();
+  $('dialog-batal').returnValue = '';
+  $('dialog-batal').showModal();
+}
+
+// Hasil pembatalan menurut kebijakan (untuk pratinjau)
+function hasilBatal(b, olehKlub) {
+  if (b.pembelian_paket_id || Number(b.total_dibayar) === 0) return 'tanpa_dana';
+  const mulai = new Date(`${b.tanggal}T${jam(b.jam_mulai)}:00`);   // waktu lokal (WIB)
+  const selisihJam = (mulai - new Date()) / 36e5;
+  return olehKlub || selisihJam >= 24 ? 'refund' : 'hangus';
+}
+
+function perbaruiPratinjauBatal() {
+  const b = bkBatalTerpilih;
+  const hasil = hasilBatal(b, $('bt-oleh').value === 'klub');
+  $('bt-wrap-metode').hidden = hasil !== 'refund';
+  const el = $('bt-hasil');
+  el.className = 'pratinjau';
+  if (hasil === 'tanpa_dana') {
+    el.innerHTML = b.pembelian_paket_id
+      ? `<b>${b.durasi_jam} jam</b> dikembalikan ke paket member pelanggan. Tidak ada jurnal.`
+      : 'Belum ada pembayaran, tidak ada jurnal.';
+  } else if (hasil === 'refund') {
+    el.className = adalahOwner() ? 'pratinjau ok' : 'pratinjau error';
+    el.innerHTML = `<b>Refund ${rupiah(b.total_dibayar)}</b> dikembalikan ke pelanggan.<br>
+      Jurnal: Pendapatan Diterima di Muka (D) / Kas·Bank·QRIS (K).` +
+      (adalahOwner() ? '' : '<br><b>Hanya owner yang dapat memproses refund.</b>');
+  } else {
+    el.className = 'pratinjau error';
+    el.innerHTML = `Pembatalan &lt; 24 jam sebelum main: <b>${rupiah(b.total_dibayar)} hangus</b>.<br>
+      Jurnal: Pendapatan Diterima di Muka (D) / Pendapatan Lain-lain (K).`;
+  }
+}
+
+async function prosesPembatalan() {
+  const b = bkBatalTerpilih;
+  const { data, error } = await db.from('booking').update({
+    status: 'batal',
+    dibatalkan_oleh_klub: $('bt-oleh').value === 'klub',
+    alasan_batal: $('bt-alasan').value.trim() || null,
+    metode_refund: $('bt-metode').value
+  }).eq('id', b.id).select('kode_booking, hasil_batal').single();
+  if (adaError(error)) return;
+
+  const pesan = {
+    refund: `Refund ${rupiah(b.total_dibayar)} tercatat.`,
+    hangus: `${rupiah(b.total_dibayar)} dicatat sebagai pendapatan lain-lain.`,
+    tanpa_dana: b.pembelian_paket_id ? 'Jam paket dikembalikan.' : 'Tidak ada dana yang diproses.'
+  };
+  tampilkanPesan(`Booking ${data.kode_booking} dibatalkan. ${pesan[data.hasil_batal] || ''}`);
+  await Promise.all([muatJadwal(), muatDaftarBooking(), muatPaketPelanggan()]);
+  sorotBaris(`#bk-daftar tr[data-id="${b.id}"]`);
 }
