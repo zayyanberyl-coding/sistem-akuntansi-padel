@@ -1,0 +1,329 @@
+/* ==================================================================
+   DAFTAR UJI OTOMATIS — database Sistem Akuntansi Pendapatan Padel
+   ------------------------------------------------------------------
+   Setiap uji berisi:
+     kelompok : judul kelompok uji
+     nama     : apa yang dibuktikan
+     sebagai  : siapa yang menjalankan
+                'anon'        = pengunjung tanpa login
+                'tanpa_peran' = login, tetapi tidak terdaftar di tabel pengguna
+                'admin' / 'owner'
+                'sistem'      = superuser (memeriksa hasil, tanpa RLS)
+     jalankan : fungsi async (q) -> { lulus, info }
+                q(sql) menjalankan SQL dan mengembalikan baris hasil.
+
+   Setiap uji berjalan di dalam transaksi yang selalu di-ROLLBACK,
+   jadi uji tidak saling memengaruhi dan data seed tetap utuh.
+   Data yang dipakai berasal dari backend/seed.sql dan seed_tambahan.sql:
+     booking 5 = hari ini 17:00, DP Rp 150.000 (QRIS)
+     booking 6 = besok, belum bayar
+     booking 7 = lusa, sudah lunas via transfer
+     sewa 4    = 2 Raket Padel Pro masih dipinjam (denda Rp 750.000/unit)
+   ================================================================== */
+
+// Ubah angka jadi teks rupiah untuk keterangan hasil uji
+const rp = (n) => 'Rp ' + Number(n).toLocaleString('id-ID');
+
+// Uji yang MENGHARAPKAN perintah ditolak database (muncul error).
+// pola (opsional) = potongan pesan error yang diharapkan.
+async function harapDitolak(q, sql, pola) {
+  try {
+    await q(sql);
+    return { lulus: false, info: 'Perintah TIDAK ditolak' };
+  } catch (e) {
+    const cocok = !pola || new RegExp(pola, 'i').test(e.message);
+    return { lulus: cocok, info: 'Ditolak: ' + e.message };
+  }
+}
+
+// Tanggal hari Selasa (hari kerja) sekitar 30 hari lagi — bebas dari data seed
+const SELASA = `(current_date + 30 + ((9 - extract(isodow from current_date + 30)::int) % 7))::date`;
+
+export const daftarUji = [
+
+  // ---------------------------------------------------------------
+  // A. INTEGRITAS JURNAL (double-entry)
+  // ---------------------------------------------------------------
+  {
+    kelompok: 'A. Integritas jurnal', nama: 'Total debit sama dengan total kredit', sebagai: 'sistem',
+    jalankan: async (q) => {
+      const [r] = await q(`select sum(debit) d, sum(kredit) k, count(distinct jurnal_id) n from jurnal_detail`);
+      return { lulus: Number(r.d) > 0 && Number(r.d) === Number(r.k),
+               info: `${r.n} jurnal · debit ${rp(r.d)} · kredit ${rp(r.k)}` };
+    }
+  },
+  {
+    kelompok: 'A. Integritas jurnal', nama: 'Tidak ada satu pun jurnal yang tidak seimbang', sebagai: 'sistem',
+    jalankan: async (q) => {
+      const [r] = await q(`select count(*) n from (select jurnal_id from jurnal_detail
+                             group by jurnal_id having sum(debit) <> sum(kredit)) x`);
+      return { lulus: Number(r.n) === 0, info: `${r.n} jurnal tidak seimbang` };
+    }
+  },
+  {
+    kelompok: 'A. Integritas jurnal', nama: 'Setiap jurnal tepat 1 baris debit + 1 baris kredit', sebagai: 'sistem',
+    jalankan: async (q) => {
+      const [r] = await q(`select count(*) n from (select jurnal_id from jurnal_detail group by jurnal_id
+                             having count(*) <> 2 or count(*) filter (where debit > 0) <> 1) x`);
+      return { lulus: Number(r.n) === 0, info: `${r.n} jurnal menyimpang` };
+    }
+  },
+  {
+    kelompok: 'A. Integritas jurnal', nama: 'Semua jurnal punya nomor bukti dan sumber transaksi', sebagai: 'sistem',
+    jalankan: async (q) => {
+      const [r] = await q(`select count(*) filter (where no_bukti is null or sumber is null or sumber_id is null) n,
+                                  count(*) total from jurnal`);
+      return { lulus: Number(r.n) === 0, info: `${r.n} dari ${r.total} jurnal tanpa no. bukti/sumber` };
+    }
+  },
+
+  // ---------------------------------------------------------------
+  // B. AKSES TANPA LOGIN (anon) — harus ditolak semua
+  // ---------------------------------------------------------------
+  {
+    kelompok: 'B. Akses tanpa login', nama: 'Membaca data pelanggan (data pribadi) ditolak', sebagai: 'anon',
+    jalankan: (q) => harapDitolak(q, `select * from pelanggan limit 1`, 'permission denied')
+  },
+  {
+    kelompok: 'B. Akses tanpa login', nama: 'Membaca jurnal ditolak', sebagai: 'anon',
+    jalankan: (q) => harapDitolak(q, `select * from v_jurnal_lengkap limit 1`, 'permission denied')
+  },
+  {
+    kelompok: 'B. Akses tanpa login', nama: 'Membuat booking ditolak', sebagai: 'anon',
+    jalankan: (q) => harapDitolak(q,
+      `insert into booking (pelanggan_id, lapangan_id, tanggal, jam_mulai, jam_selesai)
+       values (1, 1, current_date + 30, '08:00', '09:00')`, 'permission denied')
+  },
+  {
+    kelompok: 'B. Akses tanpa login', nama: 'Memanggil fungsi hitung_tarif ditolak', sebagai: 'anon',
+    jalankan: (q) => harapDitolak(q, `select * from hitung_tarif(1, current_date + 30, '08:00', '09:00')`,
+      'permission denied')
+  },
+
+  // ---------------------------------------------------------------
+  // C. PERAN, OTORISASI & JEJAK AUDIT
+  // ---------------------------------------------------------------
+  {
+    kelompok: 'C. Peran & otorisasi', nama: 'Akun login tanpa peran tidak melihat data apa pun', sebagai: 'tanpa_peran',
+    jalankan: async (q) => {
+      const [r] = await q(`select (select count(*) from booking) b, (select count(*) from pelanggan) p,
+                                  (select count(*) from jurnal) j`);
+      const total = Number(r.b) + Number(r.p) + Number(r.j);
+      return { lulus: total === 0, info: `booking ${r.b}, pelanggan ${r.p}, jurnal ${r.j} baris terlihat` };
+    }
+  },
+  {
+    kelompok: 'C. Peran & otorisasi', nama: 'Admin tidak bisa mengubah tarif lapangan', sebagai: 'admin',
+    jalankan: async (q) => {
+      const rows = await q(`update lapangan set tarif_normal = 1 where id = 1 returning id`);
+      return { lulus: rows.length === 0, info: `${rows.length} baris berubah` };
+    }
+  },
+  {
+    kelompok: 'C. Peran & otorisasi', nama: 'Owner bisa mengubah tarif lapangan', sebagai: 'owner',
+    jalankan: async (q) => {
+      const rows = await q(`update lapangan set tarif_normal = 210000 where id = 1 returning id`);
+      return { lulus: rows.length === 1, info: `${rows.length} baris berubah` };
+    }
+  },
+  {
+    kelompok: 'C. Peran & otorisasi', nama: 'Menulis jurnal langsung dari aplikasi ditolak', sebagai: 'admin',
+    jalankan: (q) => harapDitolak(q,
+      `insert into jurnal (tanggal, keterangan, sumber) values (current_date, 'Jurnal palsu', 'manual')`)
+  },
+  {
+    kelompok: 'C. Peran & otorisasi', nama: 'Memanggil buat_jurnal() langsung ditolak', sebagai: 'admin',
+    jalankan: (q) => harapDitolak(q,
+      `select buat_jurnal(current_date, 'Palsu', 'manual', 1, '1-101', '4-201', 1000000)`, 'permission denied')
+  },
+  {
+    kelompok: 'C. Peran & otorisasi', nama: 'Menghapus booking tidak mungkin (tanpa izin DELETE)', sebagai: 'admin',
+    jalankan: async (q) => {
+      try {
+        const rows = await q(`delete from booking where id = 6 returning id`);
+        return { lulus: rows.length === 0, info: `${rows.length} baris terhapus (diblokir RLS: tidak ada policy DELETE)` };
+      } catch (e) {
+        return { lulus: true, info: 'Ditolak: ' + e.message };
+      }
+    }
+  },
+  {
+    kelompok: 'C. Peran & otorisasi', nama: 'Menulis riwayat status secara manual ditolak', sebagai: 'admin',
+    jalankan: (q) => harapDitolak(q,
+      `insert into riwayat_status_booking (booking_id, status_baru, keterangan) values (6, 'selesai', 'palsu')`)
+  },
+  {
+    kelompok: 'C. Peran & otorisasi', nama: 'Refund oleh admin ditolak (refund khusus owner)', sebagai: 'admin',
+    jalankan: (q) => harapDitolak(q,
+      `update booking set status = 'batal', metode_refund = 'transfer' where id = 7`, 'harus dilakukan oleh owner')
+  },
+  {
+    kelompok: 'C. Peran & otorisasi', nama: 'Refund oleh owner berhasil: jurnal PDDM (D) / Bank (K)', sebagai: 'owner',
+    jalankan: async (q) => {
+      await q(`update booking set status = 'batal', metode_refund = 'transfer', alasan_batal = 'uji' where id = 7`);
+      const [b] = await q(`select hasil_batal, total_harga from booking where id = 7`);
+      const det = await q(`select jd.akun_kode, jd.debit, jd.kredit from jurnal_detail jd join jurnal j on j.id = jd.jurnal_id
+                           where j.sumber = 'booking' and j.sumber_id = 7 order by jd.id`);
+      const kredit = det.find(d => Number(d.kredit) > 0);
+      const debit  = det.find(d => Number(d.debit) > 0);
+      const ok = b.hasil_batal === 'refund' && debit?.akun_kode === '2-101'
+              && kredit?.akun_kode === '1-102' && Number(kredit.kredit) === Number(b.total_harga);
+      return { lulus: ok, info: `hasil ${b.hasil_batal}; D ${debit?.akun_kode} / K ${kredit?.akun_kode} ${rp(kredit?.kredit || 0)}` };
+    }
+  },
+  {
+    kelompok: 'C. Peran & otorisasi', nama: 'Jejak audit: pembuat booking & riwayat status tercatat otomatis', sebagai: 'admin',
+    jalankan: async (q) => {
+      await q(`insert into booking (pelanggan_id, lapangan_id, tanggal, jam_mulai, jam_selesai, dibuat_oleh)
+               values (1, 3, current_date + 30, '07:00', '08:00', '00000000-0000-0000-0000-000000000001')`);
+      const [b] = await q(`select b.dibuat_oleh, r.oleh, r.status_baru from booking b
+                           join riwayat_status_booking r on r.booking_id = b.id
+                           where b.id = (select max(id) from booking)`);
+      const admin = '00000000-0000-0000-0000-000000000002';
+      return { lulus: b.dibuat_oleh === admin && b.oleh === admin,
+               info: `dibuat_oleh = ${b.dibuat_oleh === admin ? 'admin (isian palsu "owner" diabaikan)' : b.dibuat_oleh}; riwayat "${b.status_baru}"` };
+    }
+  },
+
+  // ---------------------------------------------------------------
+  // D. VALIDASI TRANSAKSI DI SERVER
+  // ---------------------------------------------------------------
+  {
+    kelompok: 'D. Validasi transaksi', nama: 'Booking untuk tanggal yang sudah lewat ditolak', sebagai: 'admin',
+    jalankan: (q) => harapDitolak(q,
+      `insert into booking (pelanggan_id, lapangan_id, tanggal, jam_mulai, jam_selesai)
+       values (1, 3, current_date - 1, '07:00', '08:00')`, 'sudah lewat')
+  },
+  {
+    kelompok: 'D. Validasi transaksi', nama: 'Booking yang bentrok jadwal ditolak', sebagai: 'admin',
+    jalankan: async (q) => {
+      await q(`insert into booking (pelanggan_id, lapangan_id, tanggal, jam_mulai, jam_selesai)
+               values (1, 1, current_date + 30, '08:00', '10:00')`);
+      return harapDitolak(q, `insert into booking (pelanggan_id, lapangan_id, tanggal, jam_mulai, jam_selesai)
+               values (2, 1, current_date + 30, '09:00', '11:00')`, 'bentrok');
+    }
+  },
+  {
+    kelompok: 'D. Validasi transaksi', nama: 'Tarif per jam: Selasa 16–18 Court A = 1 jam normal + 1 jam prime', sebagai: 'admin',
+    jalankan: async (q) => {
+      const [t] = await q(`select * from hitung_tarif(1, ${SELASA}, '16:00', '18:00')`);
+      return { lulus: Number(t.total) === 500000 && t.jenis_tarif === 'campuran',
+               info: `${t.jam_normal} jam normal + ${t.jam_prime} jam prime = ${rp(t.total)} (${t.jenis_tarif})` };
+    }
+  },
+  {
+    kelompok: 'D. Validasi transaksi', nama: 'Pembayaran bertanggal besok ditolak', sebagai: 'admin',
+    jalankan: (q) => harapDitolak(q,
+      `insert into pembayaran (booking_id, tanggal, jumlah, metode_bayar) values (6, current_date + 1, 100000, 'tunai')`,
+      'masa depan')
+  },
+  {
+    kelompok: 'D. Validasi transaksi', nama: 'Admin mencatat pembayaran mundur 5 hari ditolak', sebagai: 'admin',
+    jalankan: (q) => harapDitolak(q,
+      `insert into pembayaran (booking_id, tanggal, jumlah, metode_bayar) values (6, current_date - 5, 100000, 'tunai')`,
+      'hanya boleh dicatat oleh owner')
+  },
+  {
+    kelompok: 'D. Validasi transaksi', nama: 'Owner boleh mencatat pembayaran mundur 5 hari', sebagai: 'owner',
+    jalankan: async (q) => {
+      const rows = await q(`insert into pembayaran (booking_id, tanggal, jumlah, metode_bayar)
+                            values (6, current_date - 5, 100000, 'tunai') returning jenis`);
+      return { lulus: rows.length === 1, info: `tercatat sebagai "${rows[0]?.jenis}"` };
+    }
+  },
+  {
+    kelompok: 'D. Validasi transaksi', nama: 'Pembayaran melebihi sisa tagihan ditolak', sebagai: 'admin',
+    jalankan: (q) => harapDitolak(q,
+      `insert into pembayaran (booking_id, tanggal, jumlah, metode_bayar)
+       select id, current_date, total_harga + 1, 'tunai' from booking where id = 6`, 'melebihi sisa tagihan')
+  },
+  {
+    kelompok: 'D. Validasi transaksi', nama: 'Sewa peralatan melebihi stok ditolak', sebagai: 'admin',
+    jalankan: (q) => harapDitolak(q,
+      `insert into sewa_peralatan (booking_id, peralatan_id, jumlah) values (6, 2, 100)`, 'tidak cukup')
+  },
+  {
+    kelompok: 'D. Validasi transaksi', nama: 'Jadwal/harga booking tidak bisa diubah', sebagai: 'admin',
+    jalankan: (q) => harapDitolak(q, `update booking set jam_mulai = '10:00', jam_selesai = '12:00' where id = 6`,
+      'tidak boleh diubah')
+  },
+  {
+    kelompok: 'D. Validasi transaksi', nama: 'Booking berstatus final (selesai) tidak bisa diubah', sebagai: 'owner',
+    jalankan: (q) => harapDitolak(q, `update booking set status = 'batal' where id = 1`, 'tidak bisa diubah lagi')
+  },
+
+  // ---------------------------------------------------------------
+  // E. LOGIKA AKUNTANSI (jurnal otomatis)
+  // ---------------------------------------------------------------
+  {
+    kelompok: 'E. Logika akuntansi', nama: 'Pendapatan diakui saat booking selesai: PDDM (D) / Pendapatan Sewa (K)', sebagai: 'sistem',
+    jalankan: async (q) => {
+      const det = await q(`select jd.akun_kode, jd.debit, jd.kredit, b.total_harga from jurnal_detail jd
+                           join jurnal j on j.id = jd.jurnal_id join booking b on b.id = j.sumber_id
+                           where j.sumber = 'booking' and j.sumber_id = 2 order by jd.id`);
+      const d = det.find(x => Number(x.debit) > 0), k = det.find(x => Number(x.kredit) > 0);
+      return { lulus: d?.akun_kode === '2-101' && k?.akun_kode === '4-101' && Number(k.kredit) === Number(k.total_harga),
+               info: `D ${d?.akun_kode} / K ${k?.akun_kode} ${rp(k?.kredit || 0)}` };
+    }
+  },
+  {
+    kelompok: 'E. Logika akuntansi', nama: 'Pembayaran QRIS dijurnal ke akun 1-103 Saldo QRIS', sebagai: 'admin',
+    jalankan: async (q) => {
+      await q(`insert into pembayaran (booking_id, tanggal, jumlah, metode_bayar) values (6, current_date, 100000, 'qris')`);
+      const det = await q(`select jd.akun_kode, jd.debit, jd.kredit from jurnal_detail jd join jurnal j on j.id = jd.jurnal_id
+                           where j.sumber = 'pembayaran' and j.sumber_id = (select max(id) from pembayaran) order by jd.id`);
+      const d = det.find(x => Number(x.debit) > 0), k = det.find(x => Number(x.kredit) > 0);
+      return { lulus: d?.akun_kode === '1-103' && k?.akun_kode === '2-101',
+               info: `D ${d?.akun_kode} / K ${k?.akun_kode} ${rp(d?.debit || 0)}` };
+    }
+  },
+  {
+    kelompok: 'E. Logika akuntansi', nama: 'Batal < 24 jam oleh admin: DP hangus → Pendapatan Lain-lain', sebagai: 'admin',
+    jalankan: async (q) => {
+      await q(`update booking set status = 'batal', alasan_batal = 'uji' where id = 5`);
+      const [b] = await q(`select hasil_batal from booking where id = 5`);
+      const det = await q(`select jd.akun_kode, jd.kredit from jurnal_detail jd join jurnal j on j.id = jd.jurnal_id
+                           where j.sumber = 'booking' and j.sumber_id = 5 and jd.kredit > 0`);
+      return { lulus: b.hasil_batal === 'hangus' && det[0]?.akun_kode === '4-201' && Number(det[0].kredit) === 150000,
+               info: `hasil ${b.hasil_batal}; K ${det[0]?.akun_kode} ${rp(det[0]?.kredit || 0)}` };
+    }
+  },
+  {
+    kelompok: 'E. Logika akuntansi', nama: 'Menandai "selesai" sebelum jam main ditolak', sebagai: 'admin',
+    jalankan: (q) => harapDitolak(q, `update booking set status = 'selesai' where id = 7`, 'belum dimainkan')
+  },
+  {
+    kelompok: 'E. Logika akuntansi', nama: 'Selesaikan massal: semua booking lunas yang lewat waktu diakui', sebagai: 'admin',
+    jalankan: async (q) => {
+      const [sebelum] = await q(`select count(*) n from v_booking_perlu_tindakan where tindakan = 'perlu_diselesaikan'`);
+      const [hasil]   = await q(`select selesaikan_booking_lewat_waktu() n`);
+      const [sesudah] = await q(`select count(*) n from v_booking_perlu_tindakan where tindakan = 'perlu_diselesaikan'`);
+      return { lulus: Number(hasil.n) === Number(sebelum.n) && Number(sesudah.n) === 0,
+               info: `${hasil.n}/${sebelum.n} booking diselesaikan; sisa ${sesudah.n}` };
+    }
+  },
+  {
+    kelompok: 'E. Logika akuntansi', nama: 'Denda dihitung server (isian denda palsu diabaikan)', sebagai: 'admin',
+    jalankan: async (q) => {
+      const [s] = await q(`update sewa_peralatan set status_kembali = 'rusak', jumlah_rusak = 1, denda = 999
+                           where id = 4 returning denda`);
+      const det = await q(`select jd.akun_kode, jd.kredit from jurnal_detail jd join jurnal j on j.id = jd.jurnal_id
+                           where j.sumber = 'sewa_peralatan' and j.sumber_id = 4 and jd.akun_kode = '4-103'`);
+      return { lulus: Number(s.denda) === 750000 && Number(det[0]?.kredit) === 750000,
+               info: `isian 999 → denda ${rp(s.denda)}; jurnal 4-103 ${rp(det[0]?.kredit || 0)}` };
+    }
+  },
+  {
+    kelompok: 'E. Logika akuntansi', nama: 'Sisa paket member kedaluwarsa diakui (breakage) — paket Teguh', sebagai: 'owner',
+    jalankan: async (q) => {
+      await q(`select akui_breakage_paket()`);
+      const [r] = await q(`select pp.nilai_breakage, pp.jam_total - pp.jam_terpakai sisa_jam,
+                                  (select sum(jd.kredit) from jurnal_detail jd join jurnal j on j.id = jd.jurnal_id
+                                    where j.sumber = 'pembelian_paket' and j.sumber_id = pp.id and jd.akun_kode = '4-104') jurnal
+                           from pembelian_paket pp join pelanggan p on p.id = pp.pelanggan_id
+                           where p.nama = 'Teguh Prasetyo' and pp.breakage_diakui`);
+      return { lulus: !!r && Number(r.nilai_breakage) > 0 && Number(r.jurnal) === Number(r.nilai_breakage),
+               info: r ? `sisa ${r.sisa_jam} jam = ${rp(r.nilai_breakage)}; jurnal 4-104 ${rp(r.jurnal || 0)}` : 'paket tidak ditemukan' };
+    }
+  }
+];

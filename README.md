@@ -266,6 +266,11 @@ sistem-akuntansi-padel/
 │       ├── jurnal.js
 │       ├── bukubesar.js
 │       └── laporan.js
+├── tests/
+│   ├── uji-database.html  # penjalan uji otomatis (buka dengan Live Server)
+│   ├── daftar-uji.js      # 35 uji: integritas jurnal, akses, peran, validasi, akuntansi
+│   ├── supabase-tiruan.sql# tiruan Auth & hak bawaan Supabase untuk database uji
+│   └── CHECKLIST_UAT.md   # checklist uji klik antarmuka (manual)
 ├── index.html             # pengalih ke frontend/ (untuk GitHub Pages)
 ├── .gitignore
 └── README.md
@@ -312,13 +317,31 @@ Di **SQL Editor → New query**, jalankan berurutan:
 - Akun login yang belum diberi peran tidak melihat data (RLS memeriksa tabel `pengguna`).
 - Jurnal hanya bisa **dibaca**; isinya dibuat trigger (`security definer`), sehingga tidak bisa dipalsukan.
 - Fungsi `buat_jurnal` tidak bisa dipanggil dari aplikasi.
-- Tidak ada izin `DELETE`; transaksi dibatalkan lewat status sehingga jejak audit tetap ada.
+- Tidak ada policy `DELETE` (RLS memblokir penghapusan); transaksi dibatalkan lewat status sehingga jejak audit tetap ada.
 - Pemindaian rahasia pada seluruh file & riwayat Git: tidak ada secret key.
 
 ## Pengujian
-Skema, trigger, dan data contoh diuji pada PostgreSQL 18 (PGlite) dengan tiruan modul Auth Supabase,
-termasuk 20 skenario otorisasi & kontrol (akses anon, akun tanpa peran, tanggal mundur/maju,
-refund oleh admin vs owner, denda manipulatif, ubah tarif oleh admin, tulis/hapus jurnal) — seluruhnya lulus.
+### 1. Uji otomatis database (`tests/uji-database.html`)
+Keempat file SQL asli dijalankan di PostgreSQL 18 **di dalam browser** (PGlite), dengan tiruan
+modul Auth & hak bawaan Supabase (`tests/supabase-tiruan.sql`). **Tidak menyentuh Supabase live.**
+Isi uji (`tests/daftar-uji.js`, 35 uji + 5 tahap pemasangan):
+- **Integritas jurnal** — total debit = kredit, tiap jurnal seimbang, bernomor bukti & bersumber.
+- **Akses tanpa login** — baca pelanggan/jurnal, buat booking, panggil fungsi: semua ditolak.
+- **Peran & otorisasi** — akun tanpa peran tidak melihat data; admin tidak bisa ubah tarif, refund,
+  menulis jurnal/riwayat, atau menghapus booking; owner bisa ubah tarif & refund; jejak audit terisi.
+- **Validasi transaksi** — tanggal lampau/masa depan, batas mundur 3 hari, bentrok jadwal, tarif campuran,
+  lebih bayar, stok kurang, jadwal terkunci, status final.
+- **Logika akuntansi** — pengakuan pendapatan, QRIS → 1-103, hangus, selesaikan massal, denda server, breakage.
+
+Cara menjalankan: buka folder proyek di VS Code → klik kanan `tests/uji-database.html` →
+**Open with Live Server** (perlu internet untuk memuat PGlite). Hasil tampil dalam ±5 detik.
+Setiap uji dijalankan dalam transaksi yang di-*rollback*, jadi uji tidak saling memengaruhi.
+
+Hasil terakhir: **40/40 lulus** (21 Oktober 2026).
+
+### 2. Uji penerimaan pengguna (`tests/CHECKLIST_UAT.md`)
+Daftar 28 langkah uji klik di aplikasi untuk peran owner & admin (login, booking, pembayaran,
+pembatalan, dashboard, peralatan, laporan, cetak). Diisi manual oleh penguji.
 
 ## Keterbatasan
 - Data dan nama usaha bersifat simulasi; belum divalidasi dengan klub padel nyata.

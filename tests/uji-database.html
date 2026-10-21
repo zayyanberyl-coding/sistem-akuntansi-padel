@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uji Database — Smash Padel</title>
+<link rel="icon" href="../frontend/img/logo.svg">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Warna mengikuti tema aplikasi (hijau mint, hijau tua, emas) */
+  :root { --latar:#e9f0ed; --kartu:#fff; --hijau:#14614f; --emas:#d49a3a; --merah:#b3261e; --teks:#1d2b27; --redup:#5f6f6a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--latar); color:var(--teks); font:15px/1.5 Inter, system-ui, sans-serif; padding:24px 16px; }
+  main { max-width:960px; margin:0 auto; }
+  h1 { margin:0 0 4px; font-size:22px; }
+  .sub { color:var(--redup); margin:0 0 20px; }
+  .kartu { background:var(--kartu); border-radius:18px; padding:18px 20px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+  .ringkas { display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+  .angka { font-size:28px; font-weight:700; }
+  .pil { padding:4px 12px; border-radius:999px; font-weight:600; font-size:13px; }
+  .pil.lulus { background:#d9efe6; color:var(--hijau); }
+  .pil.gagal { background:#f9dedc; color:var(--merah); }
+  .pil.jalan { background:#f6ead4; color:#8a5a12; }
+  h2 { font-size:15px; margin:0 0 10px; color:var(--hijau); }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:8px 6px; border-top:1px solid #eef2f0; vertical-align:top; }
+  td.ikon { width:28px; font-size:16px; }
+  td.peran { width:96px; color:var(--redup); font-size:12px; }
+  .info { color:var(--redup); font-size:13px; word-break:break-word; }
+  .gagal-baris .info { color:var(--merah); }
+  #log { white-space:pre-wrap; font-size:12px; color:var(--redup); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Uji Otomatis Database</h1>
+  <p class="sub">Sistem Akuntansi Pendapatan Sewa Lapangan Padel · file SQL asli dijalankan di PostgreSQL dalam browser (PGlite) — <b>tidak menyentuh Supabase</b>.</p>
+
+  <div class="kartu ringkas">
+    <span class="angka" id="ringkas-angka">…</span>
+    <span class="pil jalan" id="ringkas-status">Menyiapkan database…</span>
+    <span class="info" id="ringkas-waktu"></span>
+  </div>
+
+  <div id="hasil"></div>
+  <div class="kartu"><h2>Catatan proses</h2><div id="log"></div></div>
+</main>
+
+<script type="module">
+/* ==================================================================
+   PENJALAN UJI
+   1. Membuat database PostgreSQL kosong di browser (PGlite).
+   2. Menjalankan tiruan Supabase, lalu 4 file SQL asli dari backend/.
+   3. Menjalankan setiap uji di daftar-uji.js dalam transaksi yang
+      selalu di-ROLLBACK, sebagai peran yang ditentukan uji tersebut.
+   Halaman harus dibuka lewat server lokal (mis. VS Code Live Server),
+   bukan klik dua kali file, karena file SQL diambil dengan fetch().
+   ================================================================== */
+import { PGlite } from 'https://cdn.jsdelivr.net/npm/@electric-sql/pglite@0.5.8/dist/index.js';
+import { daftarUji } from './daftar-uji.js';
+
+const UID = {
+  owner:       '00000000-0000-0000-0000-000000000001',
+  admin:       '00000000-0000-0000-0000-000000000002',
+  tanpa_peran: '00000000-0000-0000-0000-000000000003'
+};
+
+const $ = (id) => document.getElementById(id);
+const log = (teks) => { $('log').textContent += teks + '\n'; };
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+
+const hasil = [];          // { kelompok, nama, sebagai, lulus, info }
+window.hasilUji = { selesai: false, hasil };   // bisa dibaca dari konsol browser
+
+function tampilkan() {
+  const kelompok = [...new Set(hasil.map(h => h.kelompok))];
+  $('hasil').innerHTML = kelompok.map(k => `
+    <div class="kartu"><h2>${esc(k)}</h2><table>
+      ${hasil.filter(h => h.kelompok === k).map(h => `
+        <tr class="${h.lulus ? '' : 'gagal-baris'}">
+          <td class="ikon">${h.lulus ? '✅' : '❌'}</td>
+          <td>${esc(h.nama)}<div class="info">${esc(h.info)}</div></td>
+          <td class="peran">${esc(h.sebagai)}</td>
+        </tr>`).join('')}
+    </table></div>`).join('');
+  const lulus = hasil.filter(h => h.lulus).length;
+  $('ringkas-angka').textContent = `${lulus}/${hasil.length}`;
+}
+
+async function jalankanSemua() {
+  const mulai = performance.now();
+  const db = new PGlite();
+  // Tanggal "hari ini" mengikuti WIB, sama dengan fungsi hari_ini_wib() di trigger
+  await db.exec(`set timezone to 'Asia/Jakarta'`);
+  const [versi] = (await db.query(`select version() v, current_date::text hari_ini`)).rows;
+  log(`Database: ${versi.v.split(',')[0]} · hari ini (WIB): ${versi.hari_ini}`);
+
+  // ---- Tahap 0: pasang database ----
+  const berkas = [
+    ['Tiruan Supabase (role, schema auth)', 'supabase-tiruan.sql'],
+    ['schema.sql', '../backend/schema.sql'],
+    ['triggers.sql', '../backend/triggers.sql'],
+    ['seed.sql', '../backend/seed.sql'],
+    ['seed_tambahan.sql', '../backend/seed_tambahan.sql']
+  ];
+  for (const [nama, url] of berkas) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`gagal mengambil ${url} (HTTP ${res.status})`);
+      await db.exec(await res.text());
+      hasil.push({ kelompok: '0. Pemasangan database', nama: `${nama} berjalan tanpa error`, sebagai: 'sistem', lulus: true, info: url });
+    } catch (e) {
+      hasil.push({ kelompok: '0. Pemasangan database', nama: `${nama} berjalan tanpa error`, sebagai: 'sistem', lulus: false, info: e.message });
+      tampilkan();
+      $('ringkas-status').className = 'pil gagal';
+      $('ringkas-status').textContent = 'Pemasangan gagal — uji dihentikan';
+      window.hasilUji.selesai = true;
+      return;
+    }
+  }
+  const [cek] = (await db.query(`select (select count(*) from booking) b, (select count(*) from jurnal) j,
+                                         (select count(*) from pengguna) u`)).rows;
+  log(`Data seed: ${cek.b} booking, ${cek.j} jurnal, ${cek.u} pengguna berperan`);
+  tampilkan();
+  $('ringkas-status').textContent = 'Menjalankan uji…';
+
+  // ---- Tahap 1: jalankan setiap uji ----
+  for (const uji of daftarUji) {
+    let h;
+    try {
+      await db.exec('begin');
+      if (uji.sebagai !== 'sistem') {
+        const role = uji.sebagai === 'anon' ? 'anon' : 'authenticated';
+        await db.exec(`set local role ${role}`);
+        await db.query(`select set_config('request.jwt.claim.sub', $1, true)`, [UID[uji.sebagai] || '']);
+      }
+      const q = async (sql) => (await db.query(sql)).rows;
+      h = await uji.jalankan(q);
+    } catch (e) {
+      h = { lulus: false, info: 'Error tak terduga: ' + e.message };
+    } finally {
+      await db.exec('rollback');   // data kembali seperti semula
+    }
+    hasil.push({ kelompok: uji.kelompok, nama: uji.nama, sebagai: uji.sebagai, ...h });
+    tampilkan();
+  }
+
+  const gagal = hasil.filter(h => !h.lulus).length;
+  $('ringkas-status').className = 'pil ' + (gagal ? 'gagal' : 'lulus');
+  $('ringkas-status').textContent = gagal ? `${gagal} uji gagal` : 'Semua uji lulus';
+  $('ringkas-waktu').textContent = `selesai dalam ${((performance.now() - mulai) / 1000).toFixed(1)} detik · ${new Date().toLocaleString('id-ID')}`;
+  window.hasilUji.selesai = true;
+}
+
+jalankanSemua().catch(e => {
+  log('ERROR: ' + e.message);
+  $('ringkas-status').className = 'pil gagal';
+  $('ringkas-status').textContent = 'Penjalan uji error';
+  window.hasilUji.selesai = true;
+});
+</script>
+</body>
+</html>
