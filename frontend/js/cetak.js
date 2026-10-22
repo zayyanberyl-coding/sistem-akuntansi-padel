@@ -81,6 +81,9 @@ async function cetakKonfirmasiBooking(idBooking) {
     <p class="dok-catatan">Ketentuan pembatalan: pembatalan oleh pelanggan ≥ 24 jam sebelum jadwal main mendapat
       pengembalian dana penuh; pembatalan &lt; 24 jam sebelum jadwal, uang yang telah dibayar tidak dapat dikembalikan.
       Pembatalan oleh klub selalu dikembalikan penuh.</p>
+    <p class="dok-catatan">Data pribadi pelanggan (nama dan nomor HP) hanya digunakan untuk keperluan pemesanan
+      dan pencatatan transaksi, tidak dibagikan kepada pihak lain, dan hanya dapat diakses oleh petugas klub.
+      Perbaikan data dapat diajukan melalui petugas.</p>
     <div class="dok-ttd"><span>Petugas,</span><span>${esc(penggunaAktif?.nama || '')}</span></div>`);
 }
 

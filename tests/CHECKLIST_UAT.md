@@ -34,7 +34,7 @@ Penguji: ____________________ Tanggal: ____________ Browser/perangkat: _________
 | B6 | Pelunasan Rp 400.000 via QRIS | Status "lunas"; sisa Rp 0 | |
 | B7 | Menu Jurnal Umum | Ada jurnal Kas/PDDM Rp 100.000 dan **Saldo QRIS**/PDDM Rp 400.000; total debit = kredit | |
 | B8 | Cetak kwitansi pelunasan B6 | Kwitansi berisi nomor KW-, terbilang "empat ratus ribu rupiah", metode QRIS | |
-| B9 | Cetak konfirmasi booking B1 | Berisi jadwal, rincian pembayaran, dan **ketentuan pembatalan** | |
+| B9 | Cetak konfirmasi booking B1 | Berisi jadwal, rincian pembayaran, **ketentuan pembatalan**, dan **pernyataan privasi data** | |
 | B10 | Coba tandai B1 "selesai" (jadwal belum dimulai) | Ditolak: booking belum dimainkan | |
 
 ## C. Pembatalan
