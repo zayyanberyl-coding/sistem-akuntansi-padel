@@ -18,6 +18,7 @@
 --    4-103  Pendapatan Denda
 --    4-104  Pendapatan Paket Member Kedaluwarsa
 --    4-201  Pendapatan Lain-lain         (DP hangus)
+--    6-101  Beban MDR QRIS               (potongan penyedia QRIS saat settlement)
 --
 --  "security definer" = fungsi berjalan dengan hak pemilik (admin database),
 --  sehingga trigger boleh menulis ke tabel jurnal walaupun pengguna aplikasi
@@ -1016,3 +1017,75 @@ revoke execute on function tutup_periode(date)       from public, anon;
 revoke execute on function buka_periode(date, text)  from public, anon;
 grant  execute on function tutup_periode(date)       to authenticated;
 grant  execute on function buka_periode(date, text)  to authenticated;
+
+
+-- ---------------------------------------------------------------------
+-- 18. SETTLEMENT QRIS - SEBELUM INSERT (validasi, owner saja)
+--     Angka dari laporan settlement penyedia QRIS:
+--       jumlah_bruto  = total pembayaran QRIS yang dicairkan
+--       jumlah_bersih = uang yang benar-benar masuk ke rekening Bank
+--     biaya_mdr dihitung server = bruto - bersih (isian aplikasi diabaikan).
+--     Bruto tidak boleh melebihi Saldo QRIS yang belum cair.
+-- ---------------------------------------------------------------------
+create or replace function trg_settlement_sebelum_insert() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  v_saldo numeric;
+begin
+  if auth.uid() is not null and coalesce(peran_saya(), '') <> 'owner' then
+    raise exception 'Settlement QRIS hanya boleh dicatat oleh owner';
+  end if;
+  perform cek_tanggal_transaksi(new.tanggal, 'settlement');
+
+  new.no_referensi := trim(coalesce(new.no_referensi, ''));
+  if new.no_referensi = '' then
+    raise exception 'Nomor referensi laporan settlement wajib diisi';
+  end if;
+  -- Pesan jelas sebelum aturan UNIQUE / CHECK di tabel (yang tetap jadi lapisan cadangan)
+  if exists (select 1 from settlement_qris where no_referensi = new.no_referensi) then
+    raise exception 'Settlement dengan nomor referensi % sudah pernah dicatat', new.no_referensi;
+  end if;
+  if new.jumlah_bersih > new.jumlah_bruto then
+    raise exception 'Jumlah masuk Bank (%) tidak boleh lebih besar dari jumlah kotor (%)',
+      rp(new.jumlah_bersih), rp(new.jumlah_bruto);
+  end if;
+
+  -- Kunci supaya dua settlement bersamaan tidak sama-sama lolos cek saldo
+  perform pg_advisory_xact_lock(103);
+  select coalesce(sum(debit - kredit), 0) into v_saldo from jurnal_detail where akun_kode = '1-103';
+  if new.jumlah_bruto > v_saldo then
+    raise exception 'Jumlah kotor % melebihi Saldo QRIS yang belum cair (%)', rp(new.jumlah_bruto), rp(v_saldo);
+  end if;
+
+  new.biaya_mdr   := new.jumlah_bruto - new.jumlah_bersih;
+  new.dibuat_oleh := coalesce(auth.uid(), new.dibuat_oleh);
+  new.created_at  := now();
+  return new;
+end;
+$$;
+
+create or replace trigger settlement_sebelum_insert
+before insert on settlement_qris
+for each row execute function trg_settlement_sebelum_insert();
+
+
+-- ---------------------------------------------------------------------
+-- 19. SETTLEMENT QRIS - SESUDAH INSERT (JURNAL OTOMATIS, 2 jurnal)
+--       (D) Bank            / (K) Saldo QRIS   sebesar jumlah bersih
+--       (D) Beban MDR QRIS  / (K) Saldo QRIS   sebesar biaya MDR (jika > 0)
+--     Total kredit Saldo QRIS = jumlah bruto.
+-- ---------------------------------------------------------------------
+create or replace function trg_settlement_sesudah_insert() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  perform buat_jurnal(new.tanggal, 'Settlement QRIS ke Bank - ' || new.no_referensi,
+    'settlement_qris', new.id, '1-102', '1-103', new.jumlah_bersih);
+  perform buat_jurnal(new.tanggal, 'Biaya MDR QRIS - ' || new.no_referensi,
+    'settlement_qris', new.id, '6-101', '1-103', new.biaya_mdr);
+  return new;
+end;
+$$;
+
+create or replace trigger settlement_sesudah_insert
+after insert on settlement_qris
+for each row execute function trg_settlement_sesudah_insert();

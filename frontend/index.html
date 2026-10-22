@@ -390,6 +390,50 @@
           </div>
         </div>
       </div>
+
+      <!-- Settlement QRIS: pencairan Saldo QRIS ke Bank. Form khusus owner. -->
+      <div class="dua-kolom">
+        <form class="panel khusus-owner" id="form-settlement">
+          <h2>Catat Settlement QRIS</h2>
+          <div class="baris">
+            <label>Tanggal masuk Bank
+              <input type="date" id="st-tanggal" required>
+            </label>
+            <label>No. referensi
+              <input type="text" id="st-referensi" placeholder="No. laporan settlement" required>
+            </label>
+          </div>
+          <div class="baris">
+            <label>Jumlah kotor (Rp)
+              <input type="number" id="st-bruto" min="1" step="1" required>
+            </label>
+            <label>Jumlah masuk Bank (Rp)
+              <input type="number" id="st-bersih" min="0" step="1" required>
+            </label>
+          </div>
+          <div class="pratinjau" id="st-info">Salin angka dari laporan settlement penyedia QRIS.</div>
+          <label>Catatan
+            <input type="text" id="st-catatan" placeholder="Opsional">
+          </label>
+          <button type="submit" class="tombol tombol-utama">Simpan Settlement</button>
+          <p class="bantuan">Jurnal otomatis: <b>Bank (D) / Saldo QRIS (K)</b> sebesar jumlah masuk Bank, dan
+            <b>Beban MDR QRIS (D) / Saldo QRIS (K)</b> sebesar selisihnya (biaya MDR).</p>
+        </form>
+
+        <div class="panel">
+          <h2>Settlement QRIS</h2>
+          <div class="pratinjau" id="st-ringkasan">Memuat saldo QRIS…</div>
+          <div class="tabel-wrap">
+            <table>
+              <thead>
+                <tr><th>Tanggal</th><th>No. Referensi</th><th class="angka">Kotor</th><th class="angka">MDR</th>
+                    <th class="angka">Masuk Bank</th><th>Dicatat oleh</th></tr>
+              </thead>
+              <tbody id="st-daftar"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- ===================== 4. PERALATAN ===================== -->

@@ -5,6 +5,7 @@
    Pendapatan Diterima di Muka (K).
    Status booking otomatis berubah jadi 'dp' atau 'lunas'.
    Tanggal tidak boleh di masa depan; mundur > 3 hari hanya owner (dijaga database).
+   Bagian bawah: settlement QRIS (pencairan Saldo QRIS ke Bank + biaya MDR), owner saja.
    ================================================================== */
 
 let byDaftarBooking = [];                 // booking yang belum lunas
@@ -33,6 +34,13 @@ function siapkanPembayaran() {
   });
 
   $('form-pembayaran').addEventListener('submit', simpanPembayaran);
+
+  // Settlement QRIS (khusus owner; aturan sebenarnya dijaga database)
+  $('st-tanggal').value = hariIni();
+  $('st-tanggal').max = hariIni();
+  $('st-bruto').addEventListener('input', tampilkanInfoSettlement);
+  $('st-bersih').addEventListener('input', tampilkanInfoSettlement);
+  $('form-settlement').addEventListener('submit', simpanSettlement);
 }
 
 async function muatPembayaran() {
@@ -53,7 +61,7 @@ async function muatPembayaran() {
     pembayaranBookingTerpilih = null;
   }
   tampilkanInfoTagihan();
-  await muatRiwayatPembayaran();
+  await Promise.all([muatRiwayatPembayaran(), muatSettlement()]);
 }
 
 function bookingTerpilih() {
@@ -127,4 +135,82 @@ async function muatRiwayatPembayaran() {
       <td><button class="tombol tombol-kecil" data-kwitansi="${p.id}" title="Cetak kwitansi">
             <i class="ti ti-receipt"></i> Kwitansi</button></td>
     </tr>`).join('');
+}
+
+
+/* ------------------------------------------------------------------
+   SETTLEMENT QRIS
+   Angka diambil dari laporan settlement penyedia QRIS. Server menghitung
+   biaya MDR (kotor - masuk Bank), menolak jumlah melebihi Saldo QRIS,
+   menolak nomor referensi ganda, lalu membuat 2 jurnal otomatis.
+   ------------------------------------------------------------------ */
+
+let saldoQrisBelumCair = 0;
+
+async function muatSettlement() {
+  const [resRingkas, resDaftar] = await Promise.all([
+    db.from('v_ringkasan_qris').select('*').single(),
+    db.from('v_settlement_qris').select('*')
+      .order('tanggal', { ascending: false }).order('id', { ascending: false }).limit(50)
+  ]);
+  if (adaError(resRingkas.error) || adaError(resDaftar.error)) return;
+
+  const r = resRingkas.data;
+  saldoQrisBelumCair = Number(r.saldo_belum_cair);
+  $('st-ringkasan').innerHTML = `
+    Saldo QRIS belum cair: <b>${rupiah(r.saldo_belum_cair)}</b>
+    ${r.belum_cair_sejak ? `(penerimaan tertua sejak ${tanggalIndo(r.belum_cair_sejak)})` : ''}<br>
+    Settlement terakhir: ${r.settlement_terakhir ? tanggalIndo(r.settlement_terakhir) : 'belum ada'}`;
+
+  $('st-daftar').innerHTML = resDaftar.data.length === 0 ? barisKosong(6, 'Belum ada settlement') :
+    resDaftar.data.map(s => `
+      <tr data-id="${s.id}">
+        <td>${tanggalIndo(s.tanggal)}</td>
+        <td>${esc(s.no_referensi)}</td>
+        <td class="angka">${rupiah(s.jumlah_bruto)}</td>
+        <td class="angka">${rupiah(s.biaya_mdr)}</td>
+        <td class="angka">${rupiah(s.jumlah_bersih)}</td>
+        <td><small class="abu">${esc(s.nama_pembuat || 'data contoh')}</small></td>
+      </tr>`).join('');
+  tampilkanInfoSettlement();
+}
+
+// Pratinjau biaya MDR (kotor - masuk Bank) dan persentasenya, untuk diperiksa owner
+function tampilkanInfoSettlement() {
+  const bruto = Number($('st-bruto').value);
+  const bersih = Number($('st-bersih').value);
+  const el = $('st-info');
+  if (!bruto || $('st-bersih').value === '') {
+    el.className = 'pratinjau';
+    el.textContent = `Salin angka dari laporan settlement penyedia QRIS. Saldo belum cair: ${rupiah(saldoQrisBelumCair)}.`;
+    return;
+  }
+  const mdr = bruto - bersih;
+  let masalah = '';
+  if (bersih > bruto) masalah = 'Jumlah masuk Bank tidak boleh lebih besar dari jumlah kotor.';
+  else if (bruto > saldoQrisBelumCair) masalah = `Jumlah kotor melebihi Saldo QRIS belum cair (${rupiah(saldoQrisBelumCair)}).`;
+  el.className = 'pratinjau ' + (masalah ? 'error' : 'ok');
+  el.innerHTML = masalah ||
+    `Biaya MDR: <b>${rupiah(mdr)}</b> (${(mdr / bruto * 100).toLocaleString('id-ID', { maximumFractionDigits: 2 })}% dari jumlah kotor)`;
+}
+
+async function simpanSettlement(e) {
+  e.preventDefault();
+  const selesai = mulaiMemuat(e);
+  const { data, error } = await db.from('settlement_qris').insert({
+    tanggal: $('st-tanggal').value,
+    no_referensi: $('st-referensi').value,
+    jumlah_bruto: Number($('st-bruto').value),
+    jumlah_bersih: Number($('st-bersih').value),
+    catatan: $('st-catatan').value || null
+    // biaya_mdr dihitung server
+  }).select().single();
+  const gagal = adaError(error);
+  selesai(gagal);
+  if (gagal) return;
+
+  tampilkanPesan(`Settlement ${data.no_referensi} tercatat: ${rupiah(data.jumlah_bersih)} masuk Bank, MDR ${rupiah(data.biaya_mdr)}.`);
+  ['st-referensi', 'st-bruto', 'st-bersih', 'st-catatan'].forEach(id => { $(id).value = ''; });
+  await muatSettlement();
+  sorotBaris(`#st-daftar tr[data-id="${data.id}"]`);
 }

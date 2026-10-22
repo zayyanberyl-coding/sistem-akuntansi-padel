@@ -48,7 +48,7 @@ async function muatDashboard() {
       .neq('status', 'batal').order('tanggal').order('jam_mulai').order('id')),
     // Ringkasan mutasi per akun per hari dihitung di server (bukan ribuan baris jurnal)
     ambilSemua(() => db.from('v_mutasi_harian')
-      .select('tanggal, akun_kode, kategori, debit, kredit').order('tanggal').order('akun_kode')),
+      .select('tanggal, akun_kode, kategori, debit, kredit').order('tanggal').order('akun_kode').order('sumber')),
     db.from('akun').select('*').eq('kategori', 'Pendapatan').order('kode'),
     db.from('peralatan').select('*').order('jenis', { ascending: false }).order('nama'),
     db.from('lapangan').select('id').eq('aktif', true),

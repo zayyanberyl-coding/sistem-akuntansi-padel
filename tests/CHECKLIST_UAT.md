@@ -80,7 +80,14 @@ Penguji: ____________________ Tanggal: ____________ Browser/perangkat: _________
 
 > Setelah G2, buka kembali bulan tersebut (isi alasan) atau jalankan ulang 4 file SQL agar data demo kembali normal.
 
+## H. Settlement QRIS (menu Pembayaran)
+
+| No | Langkah | Hasil yang diharapkan | Hasil |
+|---|---|---|---|
+| H1 | (admin) Buka menu Pembayaran | Ringkasan "Saldo QRIS belum cair" & riwayat settlement tampil; form Catat Settlement **tidak tampil** | |
+| H2 | (owner) Catat settlement: kotor Rp 100.000, masuk Bank Rp 99.700, no. referensi baru | Pratinjau MDR Rp 300 (0,3%); tersimpan; jurnal Bank Rp 99.700 & Beban MDR Rp 300 / Saldo QRIS; saldo belum cair turun Rp 100.000 | |
+
 ---
 
-**Ringkasan:** ____ dari 31 langkah sesuai harapan.
+**Ringkasan:** ____ dari 33 langkah sesuai harapan.
 Catatan / temuan: ____________________________________________________________

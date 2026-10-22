@@ -47,7 +47,8 @@ insert into akun (kode, nama, kategori, saldo_normal) values
   ('4-102', 'Pendapatan Sewa Peralatan',            'Pendapatan', 'K'),
   ('4-103', 'Pendapatan Denda',                     'Pendapatan', 'K'),
   ('4-104', 'Pendapatan Paket Member Kedaluwarsa',  'Pendapatan', 'K'),
-  ('4-201', 'Pendapatan Lain-lain',                 'Pendapatan', 'K');
+  ('4-201', 'Pendapatan Lain-lain',                 'Pendapatan', 'K'),
+  ('6-101', 'Beban MDR QRIS',                       'Beban',      'D');
 
 
 -- ---------------------------------------------------------------------

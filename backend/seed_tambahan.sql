@@ -290,6 +290,39 @@ $$;
 
 
 -- ---------------------------------------------------------------------
+-- 8. Contoh settlement QRIS mingguan (SIMULASI)
+--    Penerimaan QRIS bersih setiap minggu (Senin-Minggu) dicairkan ke Bank
+--    hari Senin berikutnya. Minggu berjalan belum dicairkan, jadi Saldo QRIS
+--    tetap menyisakan uang yang "belum cair".
+--    MDR contoh = 0,3% dari jumlah kotor. Angka ini HANYA SIMULASI; tarif MDR
+--    sebenarnya mengikuti ketentuan Bank Indonesia & penyedia QRIS.
+-- ---------------------------------------------------------------------
+do $$
+declare
+  v_minggu record;
+  v_mdr    numeric;
+begin
+  for v_minggu in
+    select date_trunc('week', j.tanggal)::date as awal, sum(jd.debit - jd.kredit) as bersih_minggu
+    from jurnal_detail jd
+    join jurnal j on j.id = jd.jurnal_id
+    where jd.akun_kode = '1-103'
+      and j.tanggal < date_trunc('week', current_date)
+    group by 1
+    having sum(jd.debit - jd.kredit) > 0
+    order by 1
+  loop
+    v_mdr := round(v_minggu.bersih_minggu * 0.003);
+    insert into settlement_qris (tanggal, no_referensi, jumlah_bruto, jumlah_bersih, catatan)
+    values (v_minggu.awal + 7, 'STL-' || to_char(v_minggu.awal, 'YYMMDD'),
+            v_minggu.bersih_minggu, v_minggu.bersih_minggu - v_mdr,
+            'Data contoh (simulasi MDR 0,3%)');
+  end loop;
+end;
+$$;
+
+
+-- ---------------------------------------------------------------------
 -- CEK HASIL
 -- ---------------------------------------------------------------------
 select

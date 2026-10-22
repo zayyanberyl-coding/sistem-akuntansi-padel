@@ -27,7 +27,7 @@ oleh trigger database, lalu diringkas menjadi Jurnal Umum, Buku Besar, dan Lapor
 | **Login** | Hanya staf terdaftar yang bisa membuka aplikasi; data pelanggan tidak bisa dibaca publik |
 | **Dashboard** | Pendapatan bulan ini, kas/bank/QRIS, pendapatan diterima di muka, rincian & donut pendapatan, tren harian, jam sibuk, pemakaian lapangan, jadwal berikutnya, **peringatan booking lewat waktu + tombol selesaikan massal** |
 | **Booking** | Form booking, pratinjau tarif normal/prime time, **cek bentrok jadwal**, grid jadwal, tandai selesai, **pembatalan dengan kebijakan refund/hangus**, **cetak konfirmasi booking** |
-| **Pembayaran** | Terima DP / pelunasan (tunai/transfer/QRIS), status otomatis `dp` / `lunas`, **cetak kwitansi** (dengan terbilang) |
+| **Pembayaran** | Terima DP / pelunasan (tunai/transfer/QRIS), status otomatis `dp` / `lunas`, **cetak kwitansi** (dengan terbilang), **settlement QRIS ke Bank + biaya MDR** (owner), saldo QRIS belum cair & umurnya |
 | **Peralatan** | Sewa raket & bola (stok otomatis berkurang), pengembalian (stok bertambah), denda kerusakan dihitung server; tambah/edit peralatan khusus owner |
 | **Member** | Data pelanggan, jenis paket (khusus owner), penjualan paket, sisa jam, **pengakuan sisa paket kedaluwarsa** |
 | **Jurnal Umum** | Jurnal otomatis per periode + cek keseimbangan + siapa yang mencatat |
@@ -58,6 +58,9 @@ oleh trigger database, lalu diringkas menjadi Jurnal Umum, Buku Besar, dan Lapor
   Syarat: bulan sudah berakhir dan semua booking di bulan itu selesai/batal. Jurnal otomatis yang terlambat
   (pengakuan pendapatan, sisa paket kedaluwarsa) dicatat di tanggal 1 bulan berikutnya yang masih terbuka.
   Membuka kembali hanya oleh owner, wajib alasan, dan tercatat di riwayat.
+- **Settlement QRIS** (owner saja — penerima uang tidak mencatat pencairan): angka diambil dari laporan settlement
+  penyedia QRIS (jumlah kotor & jumlah masuk Bank); biaya MDR dihitung server; nomor referensi tidak boleh ganda;
+  jumlah kotor tidak boleh melebihi Saldo QRIS yang belum cair.
 
 ## Logika Akuntansi (jurnal otomatis via trigger)
 
@@ -72,6 +75,8 @@ oleh trigger database, lalu diringkas menjadi Jurnal Umum, Buku Besar, dan Lapor
 | Sisa paket kedaluwarsa (breakage) | Pendapatan Diterima di Muka | Pendapatan Paket Member Kedaluwarsa | `akui_breakage_paket()` |
 | Sewa peralatan | Kas / Bank / QRIS | Pendapatan Sewa Peralatan | `sewa_sesudah_insert` |
 | Denda kerusakan peralatan | Kas / Bank / QRIS | Pendapatan Denda | `sewa_sesudah_update` |
+| Settlement QRIS: uang cair ke rekening | Bank | Saldo QRIS | `settlement_sesudah_insert` |
+| Settlement QRIS: potongan MDR | Beban MDR QRIS | Saldo QRIS | `settlement_sesudah_insert` |
 
 **Mengapa DP dicatat sebagai Pendapatan Diterima di Muka?** Uang sudah diterima,
 tetapi jasanya (lapangan) belum diberikan. Sesuai model pendapatan dari kontrak
@@ -91,6 +96,7 @@ dengan pelanggan (PSAK 72, kini bernomor PSAK 115), uang itu masih berupa
 | 4-103 | Pendapatan Denda | Pendapatan | Kredit |
 | 4-104 | Pendapatan Paket Member Kedaluwarsa | Pendapatan | Kredit |
 | 4-201 | Pendapatan Lain-lain | Pendapatan | Kredit |
+| 6-101 | Beban MDR QRIS | Beban | Debit |
 
 ### Alur status booking
 
@@ -122,6 +128,7 @@ erDiagram
     AKUN ||--o{ JURNAL_DETAIL : dicatat_di
     PENGGUNA ||--o{ TUTUP_BUKU : menutup
     PENGGUNA ||--o{ RIWAYAT_TUTUP_BUKU : mencatat
+    PENGGUNA ||--o{ SETTLEMENT_QRIS : mencatat
 
     PENGGUNA {
         uuid id PK
@@ -234,6 +241,15 @@ erDiagram
         uuid oleh FK
         timestamptz waktu
     }
+    SETTLEMENT_QRIS {
+        bigint id PK
+        date tanggal
+        text no_referensi UK
+        numeric jumlah_bruto
+        numeric jumlah_bersih
+        numeric biaya_mdr
+        uuid dibuat_oleh FK
+    }
     AKUN {
         text kode PK
         text nama
@@ -263,7 +279,7 @@ erDiagram
 ```
 sistem-akuntansi-padel/
 ├── backend/
-│   ├── schema.sql         # 15 tabel, relasi, view, keamanan (RLS & peran)
+│   ├── schema.sql         # 16 tabel, relasi, view, keamanan (RLS & peran)
 │   ├── triggers.sql       # tarif, cek bentrok, stok, kebijakan batal, jurnal otomatis
 │   ├── seed.sql           # data contoh (sedikit) + hubungkan akun login ke peran
 │   └── seed_tambahan.sql  # data contoh 1,5 bulan (opsional)
@@ -287,7 +303,7 @@ sistem-akuntansi-padel/
 │       └── laporan.js
 ├── tests/
 │   ├── uji-database.html  # penjalan uji otomatis (buka dengan Live Server)
-│   ├── daftar-uji.js      # 44 uji: integritas jurnal, akses, peran, validasi, akuntansi, tutup buku
+│   ├── daftar-uji.js      # 50 uji: integritas jurnal, akses, peran, validasi, akuntansi, tutup buku, settlement
 │   ├── supabase-tiruan.sql# tiruan Auth & hak bawaan Supabase untuk database uji
 │   └── CHECKLIST_UAT.md   # checklist uji klik antarmuka (manual)
 ├── index.html             # pengalih ke frontend/ (untuk GitHub Pages)
@@ -343,7 +359,7 @@ Di **SQL Editor → New query**, jalankan berurutan:
 ### 1. Uji otomatis database (`tests/uji-database.html`)
 Keempat file SQL asli dijalankan di PostgreSQL 18 **di dalam browser** (PGlite), dengan tiruan
 modul Auth & hak bawaan Supabase (`tests/supabase-tiruan.sql`). **Tidak menyentuh Supabase live.**
-Isi uji (`tests/daftar-uji.js`, 44 uji + 5 tahap pemasangan):
+Isi uji (`tests/daftar-uji.js`, 50 uji + 5 tahap pemasangan):
 - **Integritas jurnal** — total debit = kredit, tiap jurnal seimbang, bernomor bukti & bersumber.
 - **Akses tanpa login** — baca pelanggan/jurnal, buat booking, panggil fungsi: semua ditolak.
 - **Peran & otorisasi** — akun tanpa peran tidak melihat data; admin tidak bisa ubah tarif, refund,
@@ -353,20 +369,22 @@ Isi uji (`tests/daftar-uji.js`, 44 uji + 5 tahap pemasangan):
 - **Logika akuntansi** — pengakuan pendapatan, QRIS → 1-103, hangus, selesaikan massal, denda server, breakage.
 - **Tutup buku** — hanya owner, hanya bulan yang sudah berakhir & tuntas, transaksi/jurnal di bulan tertutup ditolak,
   jurnal otomatis terlambat digeser ke bulan terbuka, buka kembali wajib alasan.
+- **Settlement QRIS** — owner saja, 2 jurnal otomatis (Bank & Beban MDR / Saldo QRIS), MDR dihitung server,
+  tidak melebihi saldo, referensi tidak ganda, saldo & umur QRIS di data demo cocok dengan jurnal.
 
 Cara menjalankan: buka folder proyek di VS Code → klik kanan `tests/uji-database.html` →
 **Open with Live Server** (perlu internet untuk memuat PGlite). Hasil tampil dalam ±5 detik.
 Setiap uji dijalankan dalam transaksi yang di-*rollback*, jadi uji tidak saling memengaruhi.
 
-Hasil terakhir: **49/49 lulus** (21 Oktober 2026).
+Hasil terakhir: **55/55 lulus** (22 Oktober 2026).
 
 ### 2. Uji penerimaan pengguna (`tests/CHECKLIST_UAT.md`)
-Daftar 31 langkah uji klik di aplikasi untuk peran owner & admin (login, booking, pembayaran, tutup buku,
+Daftar 33 langkah uji klik di aplikasi untuk peran owner & admin (login, booking, pembayaran, tutup buku, settlement QRIS,
 pembatalan, dashboard, peralatan, laporan, cetak). Diisi manual oleh penguji.
 
 ## Keterbatasan
 - Data dan nama usaha bersifat simulasi; belum divalidasi dengan klub padel nyata.
 - Pajak daerah (PBJT) belum diterapkan; objek dan tarifnya bergantung Perda setempat.
-- Pembelian stok peralatan baru dan biaya MDR QRIS tidak dijurnal (sistem fokus pada siklus pendapatan).
+- Pembelian stok peralatan baru tidak dijurnal (sistem fokus pada siklus pendapatan).
 - Paket Supabase Free menjeda project setelah 1 minggu tidak aktif dan tanpa backup otomatis;
   untuk operasi nyata disarankan paket berbayar.

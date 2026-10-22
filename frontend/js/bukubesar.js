@@ -34,7 +34,7 @@ async function muatBukuBesar() {
   const [resAwal, resPeriode] = await Promise.all([
     // Saldo awal: ringkasan per hari SEBELUM tanggal "dari" (dijumlah di server)
     ambilSemua(() => filterAkun(db.from('v_mutasi_harian').select('tanggal, akun_kode, debit, kredit')
-      .lt('tanggal', dari).order('tanggal').order('akun_kode'))),
+      .lt('tanggal', dari).order('tanggal').order('akun_kode').order('sumber'))),
     // Rincian transaksi hanya dalam periode yang dipilih
     ambilSemua(() => filterAkun(db.from('v_jurnal_lengkap').select('*')
       .gte('tanggal', dari).lte('tanggal', sampai).order('tanggal').order('jurnal_id').order('id')))

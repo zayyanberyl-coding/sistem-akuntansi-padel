@@ -4,6 +4,8 @@
    B. Rincian pendapatan sewa lapangan per lapangan (dari booking selesai)
    C. Penerimaan & pengeluaran per metode (Kas / Bank / QRIS)
       -> bahan rekonsiliasi dengan uang di laci, rekening koran, laporan QRIS
+      Settlement QRIS -> Bank hanya perpindahan dana, jadi dipisahkan
+      (ditampilkan di tabel tersendiri beserta biaya MDR).
    D. Saldo Pendapatan Diterima di Muka (uang diterima, belum diakui)
    Angka per akun diambil dari view v_mutasi_harian (dijumlah di server).
    E. Tutup buku per bulan (owner) + riwayatnya
@@ -31,18 +33,20 @@ async function muatLaporan() {
   const sampai = $('lp-sampai').value;
 
   skeletonBlok('lp-isi', 320);     // kotak berkilau saat pertama kali dimuat (animasi.js)
-  const [resAkun, resMutasi, resBooking, resPddm] = await Promise.all([
+  const [resAkun, resMutasi, resBooking, resPddm, resSettlement] = await Promise.all([
     db.from('akun').select('*').order('kode'),
     // ambilSemua: bisa lebih dari 1.000 baris (lihat app.js)
-    ambilSemua(() => db.from('v_mutasi_harian').select('tanggal, akun_kode, kategori, debit, kredit')
-      .gte('tanggal', dari).lte('tanggal', sampai).order('tanggal').order('akun_kode')),
+    ambilSemua(() => db.from('v_mutasi_harian').select('tanggal, akun_kode, kategori, sumber, debit, kredit')
+      .gte('tanggal', dari).lte('tanggal', sampai).order('tanggal').order('akun_kode').order('sumber')),
     ambilSemua(() => db.from('v_booking_lengkap').select('id, nama_lapangan, durasi_jam, total_harga, pembelian_paket_id')
       .eq('status', 'selesai').gte('tanggal', dari).lte('tanggal', sampai).order('id')),
     ambilSemua(() => db.from('v_mutasi_harian').select('tanggal, debit, kredit')
-      .eq('akun_kode', '2-101').lte('tanggal', sampai).order('tanggal'))
+      .eq('akun_kode', '2-101').lte('tanggal', sampai).order('tanggal').order('sumber')),
+    ambilSemua(() => db.from('settlement_qris').select('jumlah_bruto, jumlah_bersih, biaya_mdr')
+      .gte('tanggal', dari).lte('tanggal', sampai).order('id'))
   ]);
-  if (adaError(resAkun.error) || adaError(resMutasi.error) ||
-      adaError(resBooking.error) || adaError(resPddm.error)) return;
+  if (adaError(resAkun.error) || adaError(resMutasi.error) || adaError(resBooking.error) ||
+      adaError(resPddm.error) || adaError(resSettlement.error)) return;
 
   const mutasi = resMutasi.data;
   const akunPendapatan = resAkun.data.filter(a => a.kategori === 'Pendapatan');
@@ -82,9 +86,10 @@ async function muatLaporan() {
   }).join('');
 
   // ---- C. Penerimaan & pengeluaran per metode ----
+  // (tanpa settlement QRIS: itu perpindahan dana internal, bukan uang dari/ke pelanggan)
   const totalMetode = { masuk: 0, keluar: 0 };
   const barisMetode = akunKas.map(akun => {
-    const baris = mutasi.filter(j => j.akun_kode === akun.kode);
+    const baris = mutasi.filter(j => j.akun_kode === akun.kode && j.sumber !== 'settlement_qris');
     const masuk = baris.reduce((t, j) => t + Number(j.debit), 0);
     const keluar = baris.reduce((t, j) => t + Number(j.kredit), 0);   // refund
     totalMetode.masuk += masuk; totalMetode.keluar += keluar;
@@ -92,6 +97,14 @@ async function muatLaporan() {
       <td class="angka">${rupiah(masuk)}</td><td class="angka">${rupiah(keluar)}</td>
       <td class="angka">${rupiah(masuk - keluar)}</td></tr>`;
   }).join('');
+
+  // ---- C2. Settlement QRIS pada periode ----
+  const stl = resSettlement.data.reduce((t, s) => ({
+    jumlah: t.jumlah + 1,
+    bruto:  t.bruto  + Number(s.jumlah_bruto),
+    mdr:    t.mdr    + Number(s.biaya_mdr),
+    bersih: t.bersih + Number(s.jumlah_bersih)
+  }), { jumlah: 0, bruto: 0, mdr: 0, bersih: 0 });
 
   // ---- D. Saldo Pendapatan Diterima di Muka per tanggal "sampai" ----
   const saldoPddm = hitungSaldo(resPddm.data, 'K');
@@ -146,12 +159,25 @@ async function muatLaporan() {
     <p class="bantuan">Cocokkan baris Kas dengan uang tunai di laci, Bank dengan rekening koran,
       dan QRIS dengan laporan settlement penyedia QRIS.</p>
 
+    <h4>Pencairan QRIS ke Bank (settlement)</h4>
+    <div class="tabel-wrap">
+      <table>
+        <thead><tr><th class="angka">Jumlah settlement</th><th class="angka">Kotor (dari Saldo QRIS)</th>
+          <th class="angka">Biaya MDR</th><th class="angka">Masuk Bank</th></tr></thead>
+        <tbody><tr><td class="angka">${stl.jumlah}</td><td class="angka">${rupiah(stl.bruto)}</td>
+          <td class="angka">${rupiah(stl.mdr)}</td><td class="angka">${rupiah(stl.bersih)}</td></tr></tbody>
+      </table>
+    </div>
+    <p class="bantuan">Settlement hanya memindahkan uang dari Saldo QRIS ke Bank, sehingga tidak dihitung
+      sebagai penerimaan pada tabel di atas. Biaya MDR dicatat sebagai beban (6-101), bukan pengurang pendapatan.</p>
+
     <h3>D. Catatan</h3>
     <p>Saldo <b>Pendapatan Diterima di Muka</b> per ${tanggalIndo(sampai)}: <b>${rupiah(saldoPddm)}</b>.
       Jumlah ini adalah uang DP, pelunasan, dan paket member yang sudah diterima
       tetapi lapangannya belum dipakai, sehingga masih dicatat sebagai kewajiban
       (belum menjadi pendapatan). Penerimaan kas pada bagian C tidak sama dengan
-      pendapatan pada bagian A karena pendapatan diakui saat jasa diberikan, bukan saat uang diterima.</p>`;
+      pendapatan pada bagian A karena pendapatan diakui saat jasa diberikan, bukan saat uang diterima.</p>
+    <p>Beban MDR QRIS periode ini: <b>${rupiah(stl.mdr)}</b> (biaya layanan penyedia QRIS, dicatat terpisah dari pendapatan).</p>`;
 }
 
 

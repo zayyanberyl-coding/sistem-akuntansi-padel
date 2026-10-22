@@ -52,6 +52,11 @@ async function jadiPengguna(q, peran) {
 
 // Persiapan (sebagai superuser): tuntaskan semua booking bulan lalu yang belum
 // selesai/batal, supaya bulan lalu memenuhi syarat untuk ditutup.
+// Persiapan settlement: pastikan ada Saldo QRIS belum cair (bayar DP booking 6 via QRIS hari ini)
+async function tambahPenerimaanQris(q) {
+  await q(`insert into pembayaran (booking_id, tanggal, jumlah, metode_bayar) values (6, current_date, 100000, 'qris')`);
+}
+
 async function tuntaskanBulanLalu(q) {
   await q(`update booking set status = 'selesai' where status = 'lunas' and tanggal < date_trunc('month', current_date)`);
   await q(`update booking set status = 'batal', alasan_batal = 'persiapan uji'
@@ -443,6 +448,70 @@ export const daftarUji = [
       const [r] = await q(`select aksi, alasan from riwayat_tutup_buku order by id desc limit 1`);
       return { lulus: tanpaAlasan.lulus && Number(t.n) === 0 && r?.aksi === 'buka',
                info: `tanpa alasan: ${tanpaAlasan.lulus ? 'ditolak' : 'TIDAK ditolak'}; dengan alasan: dibuka, riwayat "${r?.aksi}: ${r?.alasan}"` };
+    }
+  },
+
+  // ---------------------------------------------------------------
+  // G. SETTLEMENT QRIS (pencairan Saldo QRIS ke Bank + biaya MDR)
+  // ---------------------------------------------------------------
+  {
+    kelompok: 'G. Settlement QRIS', nama: 'Data demo: saldo QRIS cocok dengan jurnal dan umur saldo terlacak', sebagai: 'sistem',
+    jalankan: async (q) => {
+      const [r] = await q(`select v.saldo_belum_cair, v.belum_cair_sejak::text sejak, v.settlement_terakhir::text terakhir,
+                                  (select sum(debit - kredit) from jurnal_detail where akun_kode = '1-103') saldo_jurnal,
+                                  (select count(*) from settlement_qris) n,
+                                  date_trunc('week', current_date)::date::text awal_minggu
+                           from v_ringkasan_qris v`);
+      const ok = Number(r.n) > 0 && Number(r.saldo_belum_cair) === Number(r.saldo_jurnal) && Number(r.saldo_belum_cair) >= 0
+              && (r.sejak === null || r.sejak >= r.awal_minggu);
+      return { lulus: ok, info: `${r.n} settlement contoh; saldo belum cair ${rp(r.saldo_belum_cair)} (= jurnal 1-103), sejak ${r.sejak ?? '-'}, terakhir ${r.terakhir}` };
+    }
+  },
+  {
+    kelompok: 'G. Settlement QRIS', nama: 'Admin tidak bisa mencatat settlement (pemisahan tugas)', sebagai: 'admin',
+    jalankan: (q) => harapDitolak(q,
+      `insert into settlement_qris (tanggal, no_referensi, jumlah_bruto, jumlah_bersih)
+       values (current_date, 'STL-UJI-ADMIN', 1000, 1000)`, 'hanya boleh dicatat oleh owner')
+  },
+  {
+    kelompok: 'G. Settlement QRIS', nama: 'Owner: 2 jurnal otomatis, MDR dihitung server (isian palsu diabaikan)', sebagai: 'owner',
+    jalankan: async (q) => {
+      await tambahPenerimaanQris(q);
+      const [s] = await q(`select least(saldo_belum_cair, 200000) bruto from v_ringkasan_qris`);
+      const bruto = Number(s.bruto), bersih = bruto - 600;
+      const [ins] = await q(`insert into settlement_qris (tanggal, no_referensi, jumlah_bruto, jumlah_bersih, biaya_mdr)
+                             values (current_date, 'STL-UJI-1', ${bruto}, ${bersih}, 1) returning id, biaya_mdr`);
+      const det = await q(`select jd.akun_kode, sum(jd.debit) d, sum(jd.kredit) k from jurnal_detail jd join jurnal j on j.id = jd.jurnal_id
+                           where j.sumber = 'settlement_qris' and j.sumber_id = ${ins.id} group by jd.akun_kode`);
+      const akun = Object.fromEntries(det.map(x => [x.akun_kode, x]));
+      const ok = Number(ins.biaya_mdr) === 600 && Number(akun['1-102']?.d) === bersih
+              && Number(akun['6-101']?.d) === 600 && Number(akun['1-103']?.k) === bruto;
+      return { lulus: ok, info: `kotor ${rp(bruto)} → Bank (D) ${rp(akun['1-102']?.d || 0)}, Beban MDR (D) ${rp(akun['6-101']?.d || 0)}, `
+                              + `Saldo QRIS (K) ${rp(akun['1-103']?.k || 0)}; isian MDR 1 → ${rp(ins.biaya_mdr)}` };
+    }
+  },
+  {
+    kelompok: 'G. Settlement QRIS', nama: 'Jumlah kotor melebihi Saldo QRIS belum cair ditolak', sebagai: 'owner',
+    jalankan: async (q) => {
+      const [s] = await q(`select saldo_belum_cair + 1 lebih from v_ringkasan_qris`);
+      return harapDitolak(q, `insert into settlement_qris (tanggal, no_referensi, jumlah_bruto, jumlah_bersih)
+                              values (current_date, 'STL-UJI-2', ${Number(s.lebih)}, ${Number(s.lebih)})`, 'melebihi Saldo QRIS');
+    }
+  },
+  {
+    kelompok: 'G. Settlement QRIS', nama: 'Jumlah masuk Bank lebih besar dari jumlah kotor ditolak', sebagai: 'owner',
+    jalankan: (q) => harapDitolak(q,
+      `insert into settlement_qris (tanggal, no_referensi, jumlah_bruto, jumlah_bersih)
+       values (current_date, 'STL-UJI-3', 1000, 1500)`, 'tidak boleh lebih besar')
+  },
+  {
+    kelompok: 'G. Settlement QRIS', nama: 'Nomor referensi yang sama tidak bisa dicatat dua kali', sebagai: 'owner',
+    jalankan: async (q) => {
+      await tambahPenerimaanQris(q);
+      await q(`insert into settlement_qris (tanggal, no_referensi, jumlah_bruto, jumlah_bersih)
+               values (current_date, 'STL-UJI-4', 1000, 997)`);
+      return harapDitolak(q, `insert into settlement_qris (tanggal, no_referensi, jumlah_bruto, jumlah_bersih)
+               values (current_date, 'STL-UJI-4', 1000, 997)`, 'sudah pernah dicatat');
     }
   }
 ];
