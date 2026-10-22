@@ -136,8 +136,10 @@ begin
   values (p_tanggal, p_keterangan, p_sumber, p_sumber_id, auth.uid())
   returning id into v_id;
 
-  -- Nomor bukti otomatis, contoh: JU-00012
-  update jurnal set no_bukti = 'JU-' || lpad(v_id::text, 5, '0') where id = v_id;
+  -- Nomor bukti otomatis, contoh: JU-00012. Diisi nol sampai 5 digit;
+  -- id yang lebih panjang ditulis utuh (lpad biasa akan MEMOTONG id 123456 jadi 12345).
+  update jurnal set no_bukti = 'JU-' || lpad(v_id::text, greatest(5, length(v_id::text)), '0')
+   where id = v_id;
 
   insert into jurnal_detail (jurnal_id, akun_kode, debit, kredit) values
     (v_id, p_akun_debit,  p_jumlah, 0),        -- baris DEBIT
@@ -311,8 +313,10 @@ begin
   new.dibuat_oleh   := coalesce(auth.uid(), new.dibuat_oleh);
   new.diubah_oleh   := null;
 
-  -- Kode booking otomatis, contoh: BK-260926-0007
-  new.kode_booking := 'BK-' || to_char(new.tanggal, 'YYMMDD') || '-' || lpad(new.id::text, 4, '0');
+  -- Kode booking otomatis, contoh: BK-260926-0007. Diisi nol sampai 4 digit;
+  -- id yang lebih panjang ditulis utuh supaya kode tidak terpotong & kembar.
+  new.kode_booking := 'BK-' || to_char(new.tanggal, 'YYMMDD') || '-'
+                      || lpad(new.id::text, greatest(4, length(new.id::text)), '0');
   new.created_at   := now();
   return new;
 end;
@@ -429,6 +433,12 @@ begin
 
   -- Pembatalan: tentukan hasilnya sesuai kebijakan
   if new.status = 'batal' then
+    -- Peralatan yang masih dipinjam harus dikembalikan dulu (stok & denda beres)
+    if exists (select 1 from sewa_peralatan where booking_id = new.id and status_kembali = 'dipinjam') then
+      raise exception 'Booking % masih punya peralatan yang dipinjam. Proses pengembalian dulu sebelum membatalkan',
+        new.kode_booking;
+    end if;
+
     select coalesce(sum(jumlah), 0) into v_dibayar from pembayaran where booking_id = new.id;
 
     if new.pembelian_paket_id is not null or v_dibayar = 0 then
@@ -574,6 +584,7 @@ begin
 
   new.jenis       := case when new.jumlah = v_sisa then 'pelunasan' else 'dp' end;
   new.dibuat_oleh := coalesce(auth.uid(), new.dibuat_oleh);
+  new.created_at  := now();   -- waktu pencatatan dari server (jejak audit), isian aplikasi diabaikan
   return new;
 end;
 $$;
@@ -1025,7 +1036,9 @@ grant  execute on function buka_periode(date, text)  to authenticated;
 --       jumlah_bruto  = total pembayaran QRIS yang dicairkan
 --       jumlah_bersih = uang yang benar-benar masuk ke rekening Bank
 --     biaya_mdr dihitung server = bruto - bersih (isian aplikasi diabaikan).
---     Bruto tidak boleh melebihi Saldo QRIS yang belum cair.
+--     Bruto tidak boleh melebihi Saldo QRIS yang tersedia PER TANGGAL
+--     settlement, dan saldo pada tanggal-tanggal sesudahnya tidak boleh
+--     menjadi minus (settlement bertanggal mundur tetap masuk akal).
 -- ---------------------------------------------------------------------
 create or replace function trg_settlement_sebelum_insert() returns trigger
 language plpgsql security definer set search_path = public as $$
@@ -1052,9 +1065,23 @@ begin
 
   -- Kunci supaya dua settlement bersamaan tidak sama-sama lolos cek saldo
   perform pg_advisory_xact_lock(103);
-  select coalesce(sum(debit - kredit), 0) into v_saldo from jurnal_detail where akun_kode = '1-103';
+  -- Saldo QRIS kumulatif per hari; yang boleh dicairkan = saldo terkecil
+  -- mulai tanggal settlement sampai hari terakhir yang ada transaksinya.
+  with harian as (
+    select j.tanggal, sum(jd.debit - jd.kredit) as mutasi
+    from jurnal_detail jd join jurnal j on j.id = jd.jurnal_id
+    where jd.akun_kode = '1-103'
+    group by j.tanggal
+  ), kumulatif as (
+    select tanggal, sum(mutasi) over (order by tanggal) as saldo from harian
+  )
+  select least(
+           coalesce((select saldo from kumulatif where tanggal <= new.tanggal order by tanggal desc limit 1), 0),
+           coalesce((select min(saldo) from kumulatif where tanggal > new.tanggal), 'infinity'::numeric))
+    into v_saldo;
   if new.jumlah_bruto > v_saldo then
-    raise exception 'Jumlah kotor % melebihi Saldo QRIS yang belum cair (%)', rp(new.jumlah_bruto), rp(v_saldo);
+    raise exception 'Jumlah kotor % melebihi Saldo QRIS yang tersedia per % (%)',
+      rp(new.jumlah_bruto), to_char(new.tanggal, 'DD-MM-YYYY'), rp(greatest(v_saldo, 0));
   end if;
 
   new.biaya_mdr   := new.jumlah_bruto - new.jumlah_bersih;

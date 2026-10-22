@@ -84,11 +84,11 @@ insert into peralatan (id, nama, jenis, tarif_sewa, denda_rusak, stok) values
 
 -- Paket member: Dewi membeli Paket Silver 10 hari lalu
 --   -> jurnal: Kas (D) / Pendapatan Diterima di Muka (K)
-insert into pembelian_paket (id, pelanggan_id, paket_id, tanggal_beli, metode_bayar) values
+insert into pembelian_paket (id, pelanggan_id, paket_id, tanggal_beli, metode_bayar) overriding system value values
   (1, 4, 1, current_date - 10, 'transfer');
 
 -- Booking (harga & status dihitung trigger)
-insert into booking (id, pelanggan_id, lapangan_id, tanggal, jam_mulai, jam_selesai, pembelian_paket_id) values
+insert into booking (id, pelanggan_id, lapangan_id, tanggal, jam_mulai, jam_selesai, pembelian_paket_id) overriding system value values
   (1, 1, 1, current_date - 6, '08:00', '10:00', null),  -- DP lalu lunas, selesai
   (2, 2, 2, current_date - 5, '18:00', '20:00', null),  -- langsung lunas, selesai
   (3, 3, 1, current_date - 3, '19:00', '21:00', null),  -- DP lalu BATAL (DP hangus)
@@ -127,7 +127,7 @@ insert into pembayaran (booking_id, tanggal, jumlah, metode_bayar) values
   (9, current_date - 1, 200000, 'transfer');
 
 -- Sewa peralatan -> stok berkurang + jurnal Kas/QRIS (D) / Pendapatan Sewa Peralatan (K)
-insert into sewa_peralatan (id, booking_id, peralatan_id, jumlah, tanggal_sewa, metode_bayar) values
+insert into sewa_peralatan (id, booking_id, peralatan_id, jumlah, tanggal_sewa, metode_bayar) overriding system value values
   (1, 1, 1, 2, current_date - 6, 'tunai'),   -- 2 raket standar
   (2, 2, 1, 4, current_date - 5, 'qris'),    -- 4 raket standar
   (3, 2, 3, 1, current_date - 5, 'qris'),    -- 1 tabung bola

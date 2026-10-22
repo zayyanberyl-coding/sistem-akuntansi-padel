@@ -9,14 +9,17 @@
    ================================================================== */
 
 let penggunaAktif = null;   // { id, nama, peran } setelah login berhasil
+let sedangMenolakAkun = false;   // true saat akun tanpa peran sedang dikeluarkan (jangan reload)
 
 async function mulaiAplikasi() {
   $('form-login').addEventListener('submit', prosesLogin);
   $('tombol-keluar').addEventListener('click', keluar);
 
-  // Jika sesi berakhir / logout di tab lain -> kembali ke layar login
+  // Jika sesi berakhir / logout di tab lain -> kembali ke layar login.
+  // Kecuali saat aplikasi sendiri mengeluarkan akun tanpa peran: halaman tidak
+  // dimuat ulang supaya pesan penjelasannya tetap terlihat.
   db.auth.onAuthStateChange((event) => {
-    if (event === 'SIGNED_OUT') location.reload();
+    if (event === 'SIGNED_OUT' && !sedangMenolakAkun) location.reload();
   });
 
   const { data: { session } } = await db.auth.getSession();
@@ -54,7 +57,9 @@ async function prosesLogin(e) {
 async function masukKeAplikasi(user) {
   const { data: profil, error } = await db.from('pengguna').select('id, nama, peran').eq('id', user.id).maybeSingle();
   if (error || !profil) {
+    sedangMenolakAkun = true;
     await db.auth.signOut({ scope: 'local' });
+    sedangMenolakAkun = false;
     tampilkanLogin('Akun ini belum diberi peran oleh owner. Hubungi owner untuk mendapatkan akses.');
     return;
   }

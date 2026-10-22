@@ -47,6 +47,9 @@ oleh trigger database, lalu diringkas menjadi Jurnal Umum, Buku Besar, dan Lapor
 | Batal oleh **klub**, atau oleh pelanggan **≥ 24 jam** sebelum main | **Refund** penuh | **owner saja** |
 | Batal oleh pelanggan **< 24 jam** sebelum main | Uang yang sudah dibayar **hangus** | owner & admin |
 
+Peralatan yang masih dipinjam pada booking tersebut harus dikembalikan dulu sebelum booking bisa dibatalkan.
+Sewa peralatan yang sudah dibayar tidak ikut di-refund (dicatat terpisah dari sewa lapangan).
+
 ### Pengendalian internal
 - Peran: **owner** (semua akses, tarif, stok, paket, refund) dan **admin** (operasional harian).
 - Tanggal transaksi tidak boleh di masa depan; mundur > 3 hari hanya owner.
@@ -303,7 +306,7 @@ sistem-akuntansi-padel/
 │       └── laporan.js
 ├── tests/
 │   ├── uji-database.html  # penjalan uji otomatis (buka dengan Live Server)
-│   ├── daftar-uji.js      # 50 uji: integritas jurnal, akses, peran, validasi, akuntansi, tutup buku, settlement
+│   ├── daftar-uji.js      # 56 uji: integritas jurnal, akses, peran, validasi, akuntansi, tutup buku, settlement, review akhir
 │   ├── supabase-tiruan.sql# tiruan Auth & hak bawaan Supabase untuk database uji
 │   └── CHECKLIST_UAT.md   # checklist uji klik antarmuka (manual)
 ├── index.html             # pengalih ke frontend/ (untuk GitHub Pages)
@@ -353,13 +356,16 @@ Di **SQL Editor → New query**, jalankan berurutan:
 - Jurnal hanya bisa **dibaca**; isinya dibuat trigger (`security definer`), sehingga tidak bisa dipalsukan.
 - Fungsi `buat_jurnal` tidak bisa dipanggil dari aplikasi.
 - Tidak ada policy `DELETE` (RLS memblokir penghapusan); transaksi dibatalkan lewat status sehingga jejak audit tetap ada.
+- Hak bawaan Supabase untuk pengguna login (termasuk DELETE & TRUNCATE) dicabut, lalu diberi lagi seperlunya.
+- id tabel transaksi & akuntansi selalu dibuat database (`generated always`); waktu pencatatan diisi server.
+- Library dari CDN dikunci versinya dan diberi `integrity` (SRI), sehingga file yang berubah di CDN ditolak browser.
 - Pemindaian rahasia pada seluruh file & riwayat Git: tidak ada secret key.
 
 ## Pengujian
 ### 1. Uji otomatis database (`tests/uji-database.html`)
 Keempat file SQL asli dijalankan di PostgreSQL 18 **di dalam browser** (PGlite), dengan tiruan
 modul Auth & hak bawaan Supabase (`tests/supabase-tiruan.sql`). **Tidak menyentuh Supabase live.**
-Isi uji (`tests/daftar-uji.js`, 50 uji + 5 tahap pemasangan):
+Isi uji (`tests/daftar-uji.js`, 56 uji + 5 tahap pemasangan):
 - **Integritas jurnal** — total debit = kredit, tiap jurnal seimbang, bernomor bukti & bersumber.
 - **Akses tanpa login** — baca pelanggan/jurnal, buat booking, panggil fungsi: semua ditolak.
 - **Peran & otorisasi** — akun tanpa peran tidak melihat data; admin tidak bisa ubah tarif, refund,
@@ -371,12 +377,14 @@ Isi uji (`tests/daftar-uji.js`, 50 uji + 5 tahap pemasangan):
   jurnal otomatis terlambat digeser ke bulan terbuka, buka kembali wajib alasan.
 - **Settlement QRIS** — owner saja, 2 jurnal otomatis (Bank & Beban MDR / Saldo QRIS), MDR dihitung server,
   tidak melebihi saldo, referensi tidak ganda, saldo & umur QRIS di data demo cocok dengan jurnal.
+- **Perbaikan review akhir** — kode booking & no. bukti tidak terpotong untuk id panjang, settlement mundur dicek
+  per tanggal, batal ditolak bila alat masih dipinjam, waktu pencatatan & id dari server, hak DELETE/TRUNCATE dicabut.
 
 Cara menjalankan: buka folder proyek di VS Code → klik kanan `tests/uji-database.html` →
 **Open with Live Server** (perlu internet untuk memuat PGlite). Hasil tampil dalam ±5 detik.
 Setiap uji dijalankan dalam transaksi yang di-*rollback*, jadi uji tidak saling memengaruhi.
 
-Hasil terakhir: **55/55 lulus** (22 Oktober 2026).
+Hasil terakhir: **61/61 lulus** (22 Oktober 2026).
 
 ### 2. Uji penerimaan pengguna (`tests/CHECKLIST_UAT.md`)
 Daftar 33 langkah uji klik di aplikasi untuk peran owner & admin (login, booking, pembayaran, tutup buku, settlement QRIS,

@@ -9,7 +9,9 @@
   <!-- Font Inter (Google Fonts) & ikon Tabler (CDN) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3/dist/tabler-icons.min.css">
+  <!-- Versi dikunci + integrity (SRI): browser menolak file jika isinya berubah di CDN -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.49.0/dist/tabler-icons.min.css"
+        integrity="sha384-IcAOG/1tqv9Qnam+j3mZYPAFcNQMnQpMcafc8Nsvd44AUeTCzhUzdQiJkrROmqW6" crossorigin="anonymous">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <!-- class "belum-login": aplikasi disembunyikan sampai login dicek (auth.js) -->
@@ -763,7 +765,9 @@
        4. auth.js      -> login, logout, peran pengguna
        5. file per fitur
        ============================================================= -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Versi dikunci + integrity (SRI) supaya rilis baru / file yang diubah di CDN tidak ikut termuat -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.min.js"
+          integrity="sha384-dl/4LkSyQ4uEucc48NM6VDZLAjLLq9yMzZ5JLXumBq7Ld33XBof73hseOqPhO89+" crossorigin="anonymous"></script>
   <script src="js/supabase.js"></script>
   <script src="js/app.js"></script>
   <script src="js/auth.js"></script>

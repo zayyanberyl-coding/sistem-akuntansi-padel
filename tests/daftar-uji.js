@@ -304,6 +304,8 @@ export const daftarUji = [
   {
     kelompok: 'E. Logika akuntansi', nama: 'Batal < 24 jam oleh admin: DP hangus → Pendapatan Lain-lain', sebagai: 'admin',
     jalankan: async (q) => {
+      // raket yang dipinjam pada booking 5 dikembalikan dulu (syarat pembatalan)
+      await q(`update sewa_peralatan set status_kembali = 'dikembalikan' where id = 4`);
       await q(`update booking set status = 'batal', alasan_batal = 'uji' where id = 5`);
       const [b] = await q(`select hasil_batal from booking where id = 5`);
       const det = await q(`select jd.akun_kode, jd.kredit from jurnal_detail jd join jurnal j on j.id = jd.jurnal_id
@@ -512,6 +514,64 @@ export const daftarUji = [
                values (current_date, 'STL-UJI-4', 1000, 997)`);
       return harapDitolak(q, `insert into settlement_qris (tanggal, no_referensi, jumlah_bruto, jumlah_bersih)
                values (current_date, 'STL-UJI-4', 1000, 997)`, 'sudah pernah dicatat');
+    }
+  },
+
+  // ---------------------------------------------------------------
+  // H. PERBAIKAN HASIL REVIEW AKHIR (R1-R5)
+  // ---------------------------------------------------------------
+  {
+    kelompok: 'H. Perbaikan review akhir', nama: 'R1: kode booking & no. bukti tidak terpotong saat id panjang', sebagai: 'sistem',
+    jalankan: async (q) => {
+      await q(`select setval(pg_get_serial_sequence('booking', 'id'), 99999)`);
+      await q(`select setval(pg_get_serial_sequence('jurnal', 'id'), 123455)`);
+      const [b] = await q(`insert into booking (pelanggan_id, lapangan_id, tanggal, jam_mulai, jam_selesai)
+                           values (1, 3, current_date + 40, '07:00', '08:00') returning id, kode_booking`);
+      const [baru] = await q(`select buat_jurnal(current_date, 'uji', 'manual', 1, '1-101', '4-201', 1000) id`);
+      const [j] = await q(`select no_bukti from jurnal where id = ${baru.id}`);
+      const ok = b.kode_booking.endsWith('-100000') && j.no_bukti === 'JU-123456';
+      return { lulus: ok, info: `id ${b.id} → ${b.kode_booking}; jurnal id 123456 → ${j.no_bukti}` };
+    }
+  },
+  {
+    kelompok: 'H. Perbaikan review akhir', nama: 'R2: settlement bertanggal mundur melebihi saldo per tanggal itu ditolak', sebagai: 'owner',
+    jalankan: async (q) => {
+      await tambahPenerimaanQris(q);   // penerimaan hari ini belum ada 3 hari lalu
+      const [s] = await q(`select saldo_belum_cair from v_ringkasan_qris`);
+      return harapDitolak(q, `insert into settlement_qris (tanggal, no_referensi, jumlah_bruto, jumlah_bersih)
+                              values (current_date - 3, 'STL-MUNDUR', ${Number(s.saldo_belum_cair)}, ${Number(s.saldo_belum_cair)})`,
+        'tersedia per');
+    }
+  },
+  {
+    kelompok: 'H. Perbaikan review akhir', nama: 'R3: booking dengan peralatan masih dipinjam tidak bisa dibatalkan', sebagai: 'admin',
+    jalankan: (q) => harapDitolak(q, `update booking set status = 'batal' where id = 5`, 'masih punya peralatan')
+  },
+  {
+    kelompok: 'H. Perbaikan review akhir', nama: 'R4: waktu pencatatan pembayaran diisi server (isian palsu diabaikan)', sebagai: 'admin',
+    jalankan: async (q) => {
+      const [p] = await q(`insert into pembayaran (booking_id, tanggal, jumlah, metode_bayar, created_at)
+                           values (6, current_date, 50000, 'tunai', '2020-01-01') returning created_at::date::text tgl,
+                           current_date::text hari_ini`);
+      return { lulus: p.tgl === p.hari_ini, info: `isian 2020-01-01 → tercatat ${p.tgl}` };
+    }
+  },
+  {
+    kelompok: 'H. Perbaikan review akhir', nama: 'R4: id transaksi tidak bisa diisi dari aplikasi', sebagai: 'admin',
+    jalankan: (q) => harapDitolak(q,
+      `insert into booking (id, pelanggan_id, lapangan_id, tanggal, jam_mulai, jam_selesai)
+       values (900000, 1, 3, current_date + 40, '07:00', '08:00')`, 'non-DEFAULT')
+  },
+  {
+    kelompok: 'H. Perbaikan review akhir', nama: 'R5: pengguna login tidak punya hak DELETE / TRUNCATE', sebagai: 'sistem',
+    jalankan: async (q) => {
+      const [r] = await q(`select has_table_privilege('authenticated', 'public.booking', 'DELETE')   del_booking,
+                                  has_table_privilege('authenticated', 'public.booking', 'TRUNCATE') trunc_booking,
+                                  has_table_privilege('authenticated', 'public.jurnal',  'DELETE')   del_jurnal,
+                                  has_table_privilege('authenticated', 'public.jurnal',  'TRUNCATE') trunc_jurnal,
+                                  has_table_privilege('authenticated', 'public.booking', 'INSERT')   ins_booking`);
+      const ok = !r.del_booking && !r.trunc_booking && !r.del_jurnal && !r.trunc_jurnal && r.ins_booking;
+      return { lulus: ok, info: `DELETE/TRUNCATE booking: ${r.del_booking}/${r.trunc_booking}; jurnal: ${r.del_jurnal}/${r.trunc_jurnal}; INSERT booking tetap: ${r.ins_booking}` };
     }
   }
 ];
